@@ -39,13 +39,15 @@ app.add_middleware(
 )
 
 # Include routers
-from app.routers import buildings, devices, sessions, incidents, rules, auth
+from app.routers import buildings, devices, sessions, incidents, rules, auth, attendance, students
 app.include_router(buildings.router)
 app.include_router(devices.router)
 app.include_router(sessions.router)
 app.include_router(incidents.router)
 app.include_router(rules.router)
 app.include_router(auth.router)
+app.include_router(attendance.router)
+app.include_router(students.router)
 
 # Startup event: Initialize AI services
 @app.on_event("startup")

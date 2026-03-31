@@ -175,3 +175,122 @@ export interface ThresholdUpdatePayload {
   target_value?: number | null
   enabled?: boolean
 }
+
+export interface AttendanceConfigPayload {
+  grace_minutes: number
+  min_confidence: number
+  auto_checkin_enabled: boolean
+}
+
+export interface AttendanceMockEventPayload {
+  student_id: string
+  face_confidence?: number
+  occurred_at?: string
+  source?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface AttendanceStudentStatus {
+  student_id: string
+  student_code: string
+  student_name: string
+  status: 'PRESENT' | 'LATE' | 'ABSENT'
+  first_seen_at: string | null
+  confidence: number | null
+}
+
+export interface AttendanceSessionReport {
+  session_id: string
+  room_id: string
+  room_code: string | null
+  start_time: string
+  end_time: string | null
+  grace_minutes: number
+  min_confidence: number
+  totals: {
+    present: number
+    late: number
+    absent: number
+    enrolled: number
+  }
+  students: AttendanceStudentStatus[]
+}
+
+export interface AttendanceHistoryEntry {
+  session_id: string
+  subject_id: string | null
+  room_id: string
+  start_time: string
+  end_time: string | null
+  status: 'PRESENT' | 'LATE' | 'ABSENT'
+  first_seen_at: string | null
+}
+
+export interface AttendanceDailyRoomSummary {
+  room_id: string
+  date: string
+  sessions_count: number
+  totals: {
+    present: number
+    late: number
+    absent: number
+    enrolled: number
+  }
+}
+
+export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
+
+export interface StudentSessionCalendarItem {
+  session_id: string
+  subject_id: string | null
+  subject_name: string | null
+  subject_code: string | null
+  room_id: string
+  room_code: string | null
+  teacher_id: string | null
+  teacher_name: string | null
+  status: SessionStatus
+  mode: SessionMode
+  start_time: string
+  end_time: string | null
+  attendance_status: AttendanceStatus
+}
+
+export interface StudentAttendanceSummary {
+  present: number
+  late: number
+  absent: number
+  total_sessions: number
+}
+
+export interface StudentBehaviorSummaryItem {
+  behavior_class: string
+  count: number
+  duration_seconds: number
+  avg_confidence: number
+}
+
+export interface StudentIncidentItem {
+  id: string
+  risk_score: number
+  risk_level: string
+  triggered_behaviors: Record<string, unknown>
+  flagged_at: string
+  reviewed: boolean
+  reviewer_notes: string | null
+}
+
+export interface StudentSessionDetailResponse {
+  session_id: string
+  subject_name: string | null
+  room_code: string | null
+  teacher_name: string | null
+  start_time: string
+  end_time: string | null
+  attendance_status: AttendanceStatus
+  first_seen_at: string | null
+  confidence: number | null
+  grace_minutes: number
+  behavior_summary: StudentBehaviorSummaryItem[]
+  incidents: StudentIncidentItem[]
+}

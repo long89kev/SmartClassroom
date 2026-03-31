@@ -6,6 +6,7 @@ import { BuildingsOverviewPage } from './pages/BuildingsOverviewPage'
 import { BuildingGroupPage } from './pages/BuildingGroupPage'
 import { BuildingDashboardPage } from './pages/BuildingDashboardPage'
 import { SessionDetailPage } from './pages/SessionDetailPage'
+import { StudentDashboardPage } from './pages/StudentDashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { useAuthStore } from './store/auth'
@@ -95,6 +96,16 @@ function AuthenticatedLayout(): JSX.Element {
   )
 }
 
+function HomeRoute(): JSX.Element {
+  const user = useAuthStore((state) => state.user)
+
+  if (user?.role === 'STUDENT') {
+    return <Navigate to="/students/me/dashboard" replace />
+  }
+
+  return <BuildingsOverviewPage />
+}
+
 function App() {
   return (
     <Router>
@@ -103,10 +114,11 @@ function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AuthenticatedLayout />}>
-            <Route path="/" element={<BuildingsOverviewPage />} />
+            <Route path="/" element={<HomeRoute />} />
             <Route path="/building-groups/:groupKey" element={<BuildingGroupPage />} />
             <Route path="/buildings/:buildingId" element={<BuildingDashboardPage />} />
             <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
+            <Route path="/students/me/dashboard" element={<StudentDashboardPage />} />
           </Route>
         </Route>
 

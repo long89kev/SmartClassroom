@@ -278,8 +278,8 @@ async def create_user(
     # Normalize role: ADMIN -> SYSTEM_ADMIN for backward compatibility
     normalized_role = role.replace("ADMIN", "SYSTEM_ADMIN") if role == "ADMIN" else role.upper()
     
-    # Validate role (6 canonical roles)
-    valid_roles = {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN", "FACILITY_STAFF", "CLEANING_STAFF"}
+    # Validate role (canonical roles)
+    valid_roles = {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN", "FACILITY_STAFF", "CLEANING_STAFF", "STUDENT"}
     if normalized_role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {','.join(valid_roles)}")
     

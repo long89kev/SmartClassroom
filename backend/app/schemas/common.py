@@ -1,6 +1,6 @@
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 # =============================================================================
@@ -139,6 +139,113 @@ class SessionResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class AttendanceConfigUpsert(BaseModel):
+    grace_minutes: int = Field(default=10, ge=0, le=90)
+    min_confidence: float = Field(default=0.75, ge=0.0, le=1.0)
+    auto_checkin_enabled: bool = True
+
+
+class AttendanceMockEventIngest(BaseModel):
+    student_id: UUID
+    face_confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    occurred_at: Optional[datetime] = None
+    source: str = "MOCK_DOOR_CAMERA"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AttendanceStudentStatus(BaseModel):
+    student_id: UUID
+    student_code: str
+    student_name: str
+    status: Literal["PRESENT", "LATE", "ABSENT"]
+    first_seen_at: Optional[datetime] = None
+    confidence: Optional[float] = None
+
+
+class AttendanceSessionReport(BaseModel):
+    session_id: UUID
+    room_id: UUID
+    room_code: Optional[str] = None
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    grace_minutes: int
+    min_confidence: float
+    totals: Dict[str, int]
+    students: List[AttendanceStudentStatus] = Field(default_factory=list)
+
+
+class AttendanceStudentHistoryEntry(BaseModel):
+    session_id: UUID
+    subject_id: Optional[UUID] = None
+    room_id: UUID
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    status: Literal["PRESENT", "LATE", "ABSENT"]
+    first_seen_at: Optional[datetime] = None
+
+
+class AttendanceDailyRoomSummary(BaseModel):
+    room_id: UUID
+    date: date
+    sessions_count: int
+    totals: Dict[str, int]
+
+
+class StudentSessionCalendarItem(BaseModel):
+    session_id: UUID
+    subject_id: Optional[UUID] = None
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
+    room_id: UUID
+    room_code: Optional[str] = None
+    teacher_id: Optional[UUID] = None
+    teacher_name: Optional[str] = None
+    status: str
+    mode: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    attendance_status: Literal["PRESENT", "LATE", "ABSENT"]
+
+
+class StudentAttendanceSummary(BaseModel):
+    present: int
+    late: int
+    absent: int
+    total_sessions: int
+
+
+class StudentBehaviorSummaryItem(BaseModel):
+    behavior_class: str
+    count: int
+    duration_seconds: int
+    avg_confidence: float
+
+
+class StudentIncidentItem(BaseModel):
+    id: UUID
+    risk_score: float
+    risk_level: str
+    triggered_behaviors: Dict[str, Any]
+    flagged_at: datetime
+    reviewed: bool
+    reviewer_notes: Optional[str] = None
+
+
+class StudentSessionDetailResponse(BaseModel):
+    session_id: UUID
+    subject_name: Optional[str] = None
+    room_code: Optional[str] = None
+    teacher_name: Optional[str] = None
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    attendance_status: Literal["PRESENT", "LATE", "ABSENT"]
+    first_seen_at: Optional[datetime] = None
+    confidence: Optional[float] = None
+    grace_minutes: int
+    behavior_summary: List[StudentBehaviorSummaryItem] = Field(default_factory=list)
+    incidents: List[StudentIncidentItem] = Field(default_factory=list)
 
 # =============================================================================
 # INCIDENT & RISK SCHEMAS

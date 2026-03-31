@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Clock3, ShieldAlert } from 'lucide-react'
-import { getIncidents, getLatestSessionFrame, getSessionAnalytics, getSessions } from '../services/api'
-import type { Incident, SessionAnalytics, SessionSummary } from '../types'
+import { getIncidents, getLatestSessionFrame, getSessionAnalytics, getSessionAttendanceReport, getSessions } from '../services/api'
+import type { AttendanceSessionReport, Incident, SessionAnalytics, SessionSummary } from '../types'
 import { timeAgo, toLocalDateTime } from '../utils/time'
 import { usePermissions } from '../hooks/usePermissions'
 import { PERMISSIONS } from '../constants/permissions'
@@ -28,6 +28,7 @@ export function SessionDetailPage(): JSX.Element {
 
   const [session, setSession] = useState<SessionSummary | null>(null)
   const [analytics, setAnalytics] = useState<SessionAnalytics | null>(null)
+  const [attendanceReport, setAttendanceReport] = useState<AttendanceSessionReport | null>(null)
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [frameSrc, setFrameSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -39,19 +40,21 @@ export function SessionDetailPage(): JSX.Element {
       if (!sessionId) return
 
       try {
-        const [allSessions, analyticsData, incidentsData, frameData] = await Promise.all([
+        const [allSessions, analyticsData, incidentsData, frameData, attendanceData] = await Promise.all([
           getSessions(),
           canViewAnalytics ? getSessionAnalytics(sessionId) : Promise.resolve(null),
           canViewIncidents ? getIncidents({ session_id: sessionId }) : Promise.resolve([]),
           canViewFrame
             ? getLatestSessionFrame(sessionId)
             : Promise.resolve({ source: 'none', image_base64: null, captured_at: null }),
+          canViewAnalytics ? getSessionAttendanceReport(sessionId) : Promise.resolve(null),
         ])
 
         if (!isMounted) return
 
         setSession(allSessions.find((item) => item.id === sessionId) ?? null)
         setAnalytics(analyticsData)
+        setAttendanceReport(attendanceData)
         setIncidents(incidentsData)
         setFrameSrc(frameData.image_base64 ? ensureDataUri(frameData.image_base64) : null)
       } catch (loadError) {
@@ -168,6 +171,47 @@ export function SessionDetailPage(): JSX.Element {
           </div>
         ) : (
           <p className="muted">You do not have permission to view session analytics.</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>Attendance Summary</h2>
+        {canViewAnalytics ? (
+          attendanceReport ? (
+            <>
+              <p className="muted">
+                Present: {attendanceReport.totals.present} | Late: {attendanceReport.totals.late} | Absent: {attendanceReport.totals.absent} | Enrolled: {attendanceReport.totals.enrolled}
+              </p>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student Code</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>First Seen</th>
+                      <th>Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendanceReport.students.map((student) => (
+                      <tr key={student.student_id}>
+                        <td>{student.student_code}</td>
+                        <td>{student.student_name}</td>
+                        <td>{student.status}</td>
+                        <td>{toLocalDateTime(student.first_seen_at)}</td>
+                        <td>{student.confidence != null ? student.confidence.toFixed(2) : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <p className="muted">No attendance report available for this session.</p>
+          )
+        ) : (
+          <p className="muted">You do not have permission to view attendance.</p>
         )}
       </section>
     </main>

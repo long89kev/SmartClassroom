@@ -1,5 +1,13 @@
 import axios, { AxiosError } from 'axios'
 import type {
+  AttendanceConfigPayload,
+  AttendanceDailyRoomSummary,
+  AttendanceHistoryEntry,
+  AttendanceMockEventPayload,
+  AttendanceSessionReport,
+  StudentAttendanceSummary,
+  StudentSessionCalendarItem,
+  StudentSessionDetailResponse,
   BuildingOverview,
   DeviceCreatePayload,
   DeviceTypeItem,
@@ -181,4 +189,50 @@ export async function updateRoomThreshold(
   payload: ThresholdUpdatePayload,
 ): Promise<void> {
   await api.put(`/rooms/${roomId}/thresholds/${deviceTypeCode}`, payload)
+}
+
+export async function getSessionAttendanceReport(sessionId: string): Promise<AttendanceSessionReport> {
+  const { data } = await api.get<AttendanceSessionReport>(`/attendance/sessions/${sessionId}`)
+  return data
+}
+
+export async function updateAttendanceConfig(sessionId: string, payload: AttendanceConfigPayload): Promise<AttendanceConfigPayload> {
+  const { data } = await api.put<AttendanceConfigPayload>(`/attendance/sessions/${sessionId}/config`, payload)
+  return data
+}
+
+export async function ingestMockAttendanceEvent(sessionId: string, payload: AttendanceMockEventPayload): Promise<void> {
+  await api.post(`/attendance/sessions/${sessionId}/events/mock`, payload)
+}
+
+export async function exportSessionAttendanceCsv(sessionId: string): Promise<Blob> {
+  const { data } = await api.get<Blob>(`/attendance/sessions/${sessionId}/export`, { responseType: 'blob' })
+  return data
+}
+
+export async function getStudentAttendanceHistory(studentId: string, limit = 30): Promise<AttendanceHistoryEntry[]> {
+  const { data } = await api.get<AttendanceHistoryEntry[]>(`/attendance/students/${studentId}/history`, { params: { limit } })
+  return data
+}
+
+export async function getRoomDailyAttendanceSummary(roomId: string, day?: string): Promise<AttendanceDailyRoomSummary> {
+  const params = day ? { day } : undefined
+  const { data } = await api.get<AttendanceDailyRoomSummary>(`/attendance/rooms/${roomId}/daily-summary`, { params })
+  return data
+}
+
+export async function getStudentWeeklySessions(weekStart?: string): Promise<StudentSessionCalendarItem[]> {
+  const params = weekStart ? { week_start: weekStart } : undefined
+  const { data } = await api.get<StudentSessionCalendarItem[]>('/students/me/sessions', { params })
+  return data
+}
+
+export async function getStudentSessionDetail(sessionId: string): Promise<StudentSessionDetailResponse> {
+  const { data } = await api.get<StudentSessionDetailResponse>(`/students/me/sessions/${sessionId}`)
+  return data
+}
+
+export async function getStudentAttendanceSummary(days = 30): Promise<StudentAttendanceSummary> {
+  const { data } = await api.get<StudentAttendanceSummary>('/students/me/attendance/summary', { params: { days } })
+  return data
 }

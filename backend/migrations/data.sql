@@ -40,6 +40,13 @@ BEGIN
         ON CONFLICT (student_id) DO NOTHING;
     END LOOP;
 
+    -- Ensure all mock students are enrolled in mock subject for attendance reports.
+    INSERT INTO enrollments (id, student_id, subject_id, enrollment_date)
+    SELECT uuid_generate_v4(), s.id, v_subject_id, NOW()
+    FROM students s
+    WHERE s.student_id LIKE 'MOCK-STU-%'
+    ON CONFLICT (student_id, subject_id) DO NOTHING;
+
     SELECT ARRAY_AGG(id ORDER BY student_id) INTO v_student_ids
     FROM students
     WHERE student_id LIKE 'MOCK-STU-%';
@@ -243,6 +250,146 @@ BEGIN
             );
         END IF;
     END LOOP;
+
+    -- Create or refresh per-session attendance config for all active mock sessions.
+    INSERT INTO attendance_session_configs (id, session_id, grace_minutes, min_confidence, auto_checkin_enabled, created_at, updated_at)
+    SELECT
+        gen_random_uuid(),
+        cs.id,
+        10,
+        0.75,
+        TRUE,
+        NOW(),
+        NOW()
+    FROM class_sessions cs
+    WHERE cs.teacher_id = v_teacher_id
+      AND cs.subject_id = v_subject_id
+      AND cs.status = 'ACTIVE'
+    ON CONFLICT (session_id) DO UPDATE SET
+      grace_minutes = EXCLUDED.grace_minutes,
+      min_confidence = EXCLUDED.min_confidence,
+      auto_checkin_enabled = EXCLUDED.auto_checkin_enabled,
+      updated_at = NOW();
+
+    -- Re-seed attendance templates for mock students to keep test data deterministic.
+    DELETE FROM attendance_face_templates
+    WHERE student_id IN (
+        SELECT id FROM students WHERE student_id LIKE 'MOCK-STU-%'
+    );
+
+    INSERT INTO attendance_face_templates (id, student_id, embedding, quality_score, is_active, created_at, updated_at)
+    SELECT
+        gen_random_uuid(),
+        s.id,
+        jsonb_build_array(
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6),
+            ROUND((random())::numeric, 6)
+        ),
+        ROUND((0.85 + random() * 0.14)::numeric, 4),
+        TRUE,
+        NOW(),
+        NOW()
+    FROM students s
+    WHERE s.student_id LIKE 'MOCK-STU-%';
+
+    -- Re-seed attendance events so reports include PRESENT, LATE, and ABSENT outcomes.
+    DELETE FROM attendance_events
+    WHERE session_id IN (
+        SELECT id FROM class_sessions
+        WHERE teacher_id = v_teacher_id
+          AND subject_id = v_subject_id
+          AND status = 'ACTIVE'
+    );
+
+    INSERT INTO attendance_events (
+        id,
+        session_id,
+        student_id,
+        source,
+        face_confidence,
+        is_recognized,
+        occurred_at,
+        metadata,
+        created_by_user_id,
+        created_at
+    )
+    SELECT
+        gen_random_uuid(),
+        cs.id,
+        v_student_ids[1],
+        'MOCK_DOOR_CAMERA',
+        0.93,
+        TRUE,
+        cs.start_time + INTERVAL '2 minutes',
+        jsonb_build_object('seed', TRUE, 'arrival_type', 'early'),
+        NULL,
+        NOW()
+    FROM class_sessions cs
+    WHERE cs.teacher_id = v_teacher_id
+      AND cs.subject_id = v_subject_id
+      AND cs.status = 'ACTIVE';
+
+    INSERT INTO attendance_events (
+        id,
+        session_id,
+        student_id,
+        source,
+        face_confidence,
+        is_recognized,
+        occurred_at,
+        metadata,
+        created_by_user_id,
+        created_at
+    )
+    SELECT
+        gen_random_uuid(),
+        cs.id,
+        v_student_ids[2],
+        'MOCK_DOOR_CAMERA',
+        0.89,
+        TRUE,
+        cs.start_time + INTERVAL '15 minutes',
+        jsonb_build_object('seed', TRUE, 'arrival_type', 'late'),
+        NULL,
+        NOW()
+    FROM class_sessions cs
+    WHERE cs.teacher_id = v_teacher_id
+      AND cs.subject_id = v_subject_id
+      AND cs.status = 'ACTIVE';
+
+    INSERT INTO attendance_events (
+        id,
+        session_id,
+        student_id,
+        source,
+        face_confidence,
+        is_recognized,
+        occurred_at,
+        metadata,
+        created_by_user_id,
+        created_at
+    )
+    SELECT
+        gen_random_uuid(),
+        cs.id,
+        v_student_ids[3],
+        'MOCK_DOOR_CAMERA',
+        0.40,
+        FALSE,
+        cs.start_time + INTERVAL '3 minutes',
+        jsonb_build_object('seed', TRUE, 'arrival_type', 'below_threshold'),
+        NULL,
+        NOW()
+    FROM class_sessions cs
+    WHERE cs.teacher_id = v_teacher_id
+      AND cs.subject_id = v_subject_id
+      AND cs.status = 'ACTIVE';
 END $$;
 
 -- ============================================================================
@@ -256,8 +403,14 @@ INSERT INTO users (id, username, email, password_hash, role, is_active) VALUES
 ('550e8400-e29b-41d4-a716-446655440003'::UUID, 'board_demo', 'board@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'ACADEMIC_BOARD', TRUE),
 ('550e8400-e29b-41d4-a716-446655440004'::UUID, 'admin_demo', 'admin@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'SYSTEM_ADMIN', TRUE),
 ('550e8400-e29b-41d4-a716-446655440005'::UUID, 'facility_demo', 'facility@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'FACILITY_STAFF', TRUE),
-('550e8400-e29b-41d4-a716-446655440006'::UUID, 'cleaning_demo', 'cleaning@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'CLEANING_STAFF', TRUE)
+('550e8400-e29b-41d4-a716-446655440006'::UUID, 'cleaning_demo', 'cleaning@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'CLEANING_STAFF', TRUE),
+('550e8400-e29b-41d4-a716-446655440007'::UUID, 'student_demo', 'student@campus.local', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewY5NQn7d3M0WPf2', 'STUDENT', TRUE)
 ON CONFLICT (username) DO UPDATE SET role = EXCLUDED.role;
+
+-- Link student demo user to first seeded mock student profile
+UPDATE students
+SET user_id = '550e8400-e29b-41d4-a716-446655440007'::UUID
+WHERE student_id = 'MOCK-STU-001';
 
 -- Assign LECTURER to first 5 classrooms
 INSERT INTO user_room_assignments (user_id, room_id, can_view, can_control)

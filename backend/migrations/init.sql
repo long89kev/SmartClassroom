@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF'))
+  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
 );
 
 -- Floors
@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS students (
   name VARCHAR(255) NOT NULL,
   student_id VARCHAR(50) UNIQUE NOT NULL,
   email VARCHAR(255) UNIQUE,
+  user_id UUID UNIQUE REFERENCES users(id) ON DELETE SET NULL,
   class VARCHAR(50),
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
@@ -134,6 +135,50 @@ CREATE TABLE IF NOT EXISTS class_sessions (
   status VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, COMPLETED, CANCELLED
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- ============================================================================
+-- 2B. ATTENDANCE TRACKING
+-- ============================================================================
+
+-- Per-session attendance configuration
+CREATE TABLE IF NOT EXISTS attendance_session_configs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL UNIQUE REFERENCES class_sessions(id),
+  grace_minutes INT NOT NULL DEFAULT 10,
+  min_confidence FLOAT NOT NULL DEFAULT 0.75,
+  auto_checkin_enabled BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CHECK (grace_minutes >= 0 AND grace_minutes <= 90),
+  CHECK (min_confidence >= 0.0 AND min_confidence <= 1.0)
+);
+
+-- Face embedding templates for attendance recognition
+CREATE TABLE IF NOT EXISTS attendance_face_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID NOT NULL REFERENCES students(id),
+  embedding JSONB NOT NULL,
+  quality_score FLOAT DEFAULT 0.0,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CHECK (quality_score >= 0.0 AND quality_score <= 1.0)
+);
+
+-- Attendance recognition events from door camera or mock ingest
+CREATE TABLE IF NOT EXISTS attendance_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES class_sessions(id),
+  student_id UUID NOT NULL REFERENCES students(id),
+  source VARCHAR(50) DEFAULT 'DOOR_CAMERA',
+  face_confidence FLOAT DEFAULT 0.0,
+  is_recognized BOOLEAN DEFAULT FALSE,
+  occurred_at TIMESTAMP DEFAULT NOW(),
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_by_user_id UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW(),
+  CHECK (face_confidence >= 0.0 AND face_confidence <= 1.0)
 );
 
 -- ============================================================================
@@ -420,7 +465,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
   created_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(role, permission_id),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF'))
+  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
 );
 
 -- User-to-Room Assignments (Scope: Lecturers assigned to specific rooms/sessions)
@@ -458,7 +503,7 @@ CREATE TABLE IF NOT EXISTS role_mode_access (
   can_view_reports BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF'))
+  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
 );
 
 -- ============================================================================
@@ -475,6 +520,15 @@ CREATE INDEX idx_behavior_logs_detected_at ON behavior_logs(detected_at);
 CREATE INDEX idx_class_sessions_room_id ON class_sessions(room_id);
 CREATE INDEX idx_class_sessions_teacher_id ON class_sessions(teacher_id);
 CREATE INDEX idx_class_sessions_start_time ON class_sessions(start_time);
+CREATE INDEX idx_attendance_session_configs_session_id ON attendance_session_configs(session_id);
+CREATE INDEX idx_attendance_face_templates_student_id ON attendance_face_templates(student_id);
+CREATE INDEX idx_attendance_face_templates_is_active ON attendance_face_templates(is_active);
+CREATE INDEX idx_attendance_events_session_id ON attendance_events(session_id);
+CREATE INDEX idx_attendance_events_student_id ON attendance_events(student_id);
+CREATE INDEX idx_attendance_events_occurred_at ON attendance_events(occurred_at);
+CREATE INDEX idx_attendance_events_is_recognized ON attendance_events(is_recognized);
+CREATE INDEX idx_attendance_events_created_by_user_id ON attendance_events(created_by_user_id);
+CREATE INDEX idx_attendance_events_session_student_time ON attendance_events(session_id, student_id, occurred_at);
 CREATE INDEX idx_risk_incidents_session_id ON risk_incidents(session_id);
 CREATE INDEX idx_risk_incidents_student_id ON risk_incidents(student_id);
 CREATE INDEX idx_device_states_room_id ON device_states(room_id);
@@ -561,9 +615,13 @@ INSERT INTO permissions (key, display_name, description, category, is_active) VA
 ('incident:view', 'View Incidents', 'Access detected behavior incidents', 'incident_review', TRUE),
 ('incident:audit', 'Audit Incidents', 'Review incident logs and evidence', 'incident_review', TRUE),
 ('incident:resolve', 'Resolve Incidents', 'Close or update incident status', 'incident_review', TRUE),
+('incident:view_self', 'View Own Incidents', 'View own risk incidents only', 'incident_review', TRUE),
 ('report:performance', 'Performance Reports', 'Access student performance analytics', 'reporting', TRUE),
 ('report:attendance', 'Attendance Reports', 'View attendance and occupancy data', 'reporting', TRUE),
 ('report:incidents', 'Incident Reports', 'Generate behavior incident reports', 'reporting', TRUE),
+('report:behavior_self', 'View Own Behavior', 'View own classroom behavior metrics', 'reporting', TRUE),
+('report:attendance_self', 'View Own Attendance', 'View own attendance timeline and punctuality', 'reporting', TRUE),
+('dashboard:view_student_self', 'View Student Dashboard', 'Access student personal weekly dashboard', 'dashboard_scope', TRUE),
 ('deploy:device_management', 'Manage Devices', 'Add/update/delete classroom devices', 'deployment', TRUE),
 ('deploy:user_management', 'Manage Users', 'Create/update user roles and assignments', 'deployment', TRUE),
 ('deploy:system_settings', 'System Configuration', 'Update system-wide settings', 'deployment', TRUE)
@@ -656,6 +714,15 @@ SELECT 'CLEANING_STAFF', id FROM permissions WHERE key IN (
   'env_control:light'
 ) ON CONFLICT DO NOTHING;
 
+-- STUDENT role permissions (self-service dashboard only)
+INSERT INTO role_permissions (role, permission_id)
+SELECT 'STUDENT', id FROM permissions WHERE key IN (
+  'dashboard:view_student_self',
+  'report:attendance_self',
+  'report:behavior_self',
+  'incident:view_self'
+) ON CONFLICT DO NOTHING;
+
 -- Role-Mode Access Matrix
 INSERT INTO role_mode_access (role, can_switch_to_testing, can_switch_to_learning, can_view_reports) VALUES
 ('LECTURER', FALSE, TRUE, TRUE),
@@ -663,7 +730,8 @@ INSERT INTO role_mode_access (role, can_switch_to_testing, can_switch_to_learnin
 ('ACADEMIC_BOARD', FALSE, FALSE, TRUE),
 ('SYSTEM_ADMIN', TRUE, TRUE, TRUE),
 ('FACILITY_STAFF', FALSE, TRUE, FALSE),
-('CLEANING_STAFF', FALSE, FALSE, FALSE)
+('CLEANING_STAFF', FALSE, FALSE, FALSE),
+('STUDENT', FALSE, FALSE, TRUE)
 ON CONFLICT (role) DO UPDATE SET
   can_switch_to_testing = EXCLUDED.can_switch_to_testing,
   can_switch_to_learning = EXCLUDED.can_switch_to_learning,

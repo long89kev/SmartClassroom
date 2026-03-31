@@ -803,3 +803,221 @@ textarea {
   color: var(--muted);
   font-weight: 700;
 }
+
+.student-dashboard-page {
+  display: grid;
+  gap: 14px;
+}
+
+.student-dashboard-header {
+  display: grid;
+  gap: 10px;
+}
+
+.student-dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.student-kpi-header {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.student-stat-tile {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fdfbf7;
+  display: grid;
+  gap: 4px;
+}
+
+.student-stat-tile strong {
+  font-size: 20px;
+}
+
+.week-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.active-week {
+  min-width: 220px;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.schedule-time-axis {
+  height: 900px;
+  display: grid;
+  grid-template-rows: repeat(16, 1fr);
+}
+
+.schedule-time-mark {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  padding-right: 6px;
+  border-bottom: 1px solid #e7e1d8;
+}
+
+.schedule-week-columns {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schedule-day-column-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-day-header {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+  color: #324757;
+}
+
+.schedule-day-column {
+  position: relative;
+  height: 900px;
+  border: 1px solid #dfd9ce;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.schedule-slot {
+  height: calc(100% / 16);
+  border-bottom: 1px solid #f1ece4;
+}
+
+.schedule-block {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 2;
+  border: 1px solid #8fb1d6;
+  background: #eaf2fd;
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 0;
+  min-height: 44px;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+  align-content: start;
+  text-align: left;
+}
+
+.schedule-block.selected {
+  border-color: #285486;
+  box-shadow: 0 0 0 1px #285486;
+}
+
+.schedule-block-title {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.schedule-block-time,
+.schedule-block-room {
+  font-size: 10px;
+  color: #3f5566;
+}
+
+.attendance-badge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.attendance-badge.present {
+  background: #e7f8ef;
+  color: #1f5e42;
+}
+
+.attendance-badge.late {
+  background: #fff3df;
+  color: #7b4b16;
+}
+
+.attendance-badge.absent {
+  background: #ffeceb;
+  color: #7d2222;
+}
+
+.student-session-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.student-session-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.student-detail-section {
+  border: 1px solid #e3ddd2;
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.student-detail-section h3 {
+  font-size: 16px;
+}
+
+.student-detail-section p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+@media (max-width: 1200px) {
+  .student-dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .student-kpi-header {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .schedule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-time-axis {
+    display: none;
+  }
+
+  .schedule-week-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .schedule-week-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-day-column {
+    height: 640px;
+  }
+}

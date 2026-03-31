@@ -84,11 +84,15 @@ class Student(Base):
     name = Column(String, nullable=False)
     student_id = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String, unique=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), unique=True, index=True)
     class_name = Column("class", String(50))
     created_at = Column(DateTime, server_default=func.now())
     
+    user = relationship("User", back_populates="student_profile")
     enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")
     incidents = relationship("RiskIncident", back_populates="student")
+    attendance_face_templates = relationship("AttendanceFaceTemplate", back_populates="student", cascade="all, delete-orphan")
+    attendance_events = relationship("AttendanceEvent", back_populates="student", cascade="all, delete-orphan")
 
 class Enrollment(Base):
     __tablename__ = "enrollments"
@@ -142,6 +146,54 @@ class ClassSession(Base):
     behavior_logs = relationship("BehaviorLog", back_populates="session", cascade="all, delete-orphan")
     incidents = relationship("RiskIncident", back_populates="session", cascade="all, delete-orphan")
     aggregates = relationship("PerformanceAggregate", back_populates="session", cascade="all, delete-orphan")
+    attendance_config = relationship("AttendanceSessionConfig", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    attendance_events = relationship("AttendanceEvent", back_populates="session", cascade="all, delete-orphan")
+
+
+class AttendanceSessionConfig(Base):
+    __tablename__ = "attendance_session_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("class_sessions.id"), unique=True, nullable=False, index=True)
+    grace_minutes = Column(Integer, default=10)
+    min_confidence = Column(Float, default=0.75)
+    auto_checkin_enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    session = relationship("ClassSession", back_populates="attendance_config")
+
+
+class AttendanceFaceTemplate(Base):
+    __tablename__ = "attendance_face_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id"), nullable=False, index=True)
+    embedding = Column(JSON, nullable=False)  # Face embedding vector for matching
+    quality_score = Column(Float, default=0.0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    student = relationship("Student", back_populates="attendance_face_templates")
+
+
+class AttendanceEvent(Base):
+    __tablename__ = "attendance_events"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("class_sessions.id"), nullable=False, index=True)
+    student_id = Column(UUID(as_uuid=True), ForeignKey("students.id"), nullable=False, index=True)
+    source = Column(String, default="DOOR_CAMERA")
+    face_confidence = Column(Float, default=0.0)
+    is_recognized = Column(Boolean, default=False)
+    occurred_at = Column(DateTime, server_default=func.now(), index=True)
+    event_metadata = Column("metadata", JSON, default={})
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("ClassSession", back_populates="attendance_events")
+    student = relationship("Student", back_populates="attendance_events")
 
 # =============================================================================
 # 3. BEHAVIOR & AI MODELS
@@ -371,6 +423,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    student_profile = relationship("Student", back_populates="user", uselist=False)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

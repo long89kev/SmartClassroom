@@ -15,6 +15,7 @@ export const PERMISSIONS = {
   MODE_SWITCH_TESTING: 'mode:switch_testing',
 
   INCIDENT_VIEW: 'incident:view',
+  INCIDENT_VIEW_SELF: 'incident:view_self',
   INCIDENT_AUDIT: 'incident:audit',
   INCIDENT_RESOLVE: 'incident:resolve',
   ALERT_ACKNOWLEDGE: 'ai_alerts:acknowledge',
@@ -23,6 +24,9 @@ export const PERMISSIONS = {
   CAMERA_VIEW_RECORDED: 'camera:view_recorded',
 
   REPORT_PERFORMANCE: 'report:performance',
+  REPORT_ATTENDANCE_SELF: 'report:attendance_self',
+  REPORT_BEHAVIOR_SELF: 'report:behavior_self',
+  DASHBOARD_VIEW_STUDENT_SELF: 'dashboard:view_student_self',
 } as const
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS]
