@@ -373,6 +373,12 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class UserRegister(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+    role: Optional[str] = "STUDENT"
+
 class UserResponse(BaseModel):
     id: UUID
     username: str

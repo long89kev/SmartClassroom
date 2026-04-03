@@ -1,0 +1,6 @@
+# MQTT Gateway Dependencies
+# Smart AI-IoT Classroom System
+
+paho-mqtt>=1.6.1,<2.0
+requests>=2.31.0
+python-dotenv>=1.0.0

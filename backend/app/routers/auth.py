@@ -8,7 +8,7 @@ from typing import Optional, List, Set
 
 from app.database import get_db
 from app.models import User, Permission, RolePermission, UserRoomAssignment, UserBlockAssignment, RoleModeAccess
-from app.schemas.common import UserLogin, UserResponse, TokenResponse
+from app.schemas.common import UserLogin, UserResponse, TokenResponse, UserRegister
 from app.config import get_settings
 import bcrypt
 
@@ -215,6 +215,34 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
         token_type="bearer",
         user=UserResponse.from_orm(user)
     )
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    """Register a new user (public endpoint)"""
+    # Check if username exists
+    existing = db.query(User).filter(User.username == user_data.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Normalize role
+    normalized_role = user_data.role.upper() if user_data.role else "STUDENT"
+    valid_roles = {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN", "FACILITY_STAFF", "CLEANING_STAFF", "STUDENT"}
+    if normalized_role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {','.join(valid_roles)}")
+
+    new_user = User(
+        username=user_data.username,
+        email=user_data.email,
+        password_hash=hash_password(user_data.password),
+        role=normalized_role,
+        is_active=True
+    )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return UserResponse.from_orm(new_user)
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):

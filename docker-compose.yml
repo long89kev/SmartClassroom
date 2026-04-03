@@ -33,6 +33,25 @@ services:
       timeout: 5s
       retries: 5
 
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: doai_mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - doai_network
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h localhost -t '$$SYS/#' -C 1 -W 3 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -41,6 +60,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-doai_user}:${POSTGRES_PASSWORD:-doai_password}@postgres:5432/${POSTGRES_DB:-doai_classroom}
       REDIS_URL: redis://redis:6379/0
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: "1883"
       JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
       DEBUG: ${DEBUG:-False}
     ports:
@@ -49,6 +70,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      mosquitto:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -73,8 +96,30 @@ services:
       timeout: 5s
       retries: 5
 
+  mqtt_gateway:
+    build:
+      context: ./embedded/gateway
+      dockerfile: Dockerfile
+    container_name: doai_mqtt_gateway
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: "1883"
+      BACKEND_URL: http://backend:8000
+      ROOM_ID: ${ROOM_ID:-}
+      ROOM_CODE: ${ROOM_CODE:-B1-103}
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - doai_network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  mosquitto_data:
+  mosquitto_log:
 
 networks:
   doai_network:

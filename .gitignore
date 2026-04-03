@@ -24,3 +24,17 @@ __pycache__/
 **/__pycache__/
 *.pyc
 backend/models/yolo_weights/best.pt
+
+# Embedded / Arduino
+embedded/esp32_node/build/
+embedded/esp32_cam/build/
+*.elf
+*.bin
+*.map
+
+# Mosquitto data
+mosquitto/data/
+mosquitto/log/
+
+# PDF text extraction temp file
+main_pdf_text.txt

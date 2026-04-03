@@ -19,10 +19,11 @@ class Settings(BaseSettings):
     yolo_weights_path: str = "backend/models/yolo_weights/"
     yolo_confidence_threshold: float = 0.5
     
-    # MQTT (Mock)
+    # MQTT (Mosquitto Broker in Docker)
     mqtt_broker_host: str = "localhost"
     mqtt_broker_port: int = 1883
     mqtt_use_mock: bool = True
+    mqtt_topic_prefix: str = "classroom"
     
     # App
     debug: bool = True
