@@ -363,6 +363,31 @@ def main():
     # Initialize device controller
     controller = DeviceController(publish_fn=publish_message)
 
+    # Auto-discover room_id from backend if not set
+    if not room_config.room_id and room_config.room_code:
+        logger.info(f"ROOM_ID not set — resolving from backend using ROOM_CODE={room_config.room_code}...")
+        resolved = False
+        for attempt in range(10):
+            try:
+                url = f"{backend_config.api_url}/rooms/by-code/{room_config.room_code}"
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    room_config.room_id = data["room_id"]
+                    logger.info(f"✓ Resolved ROOM_ID: {room_config.room_id}")
+                    resolved = True
+                    break
+                else:
+                    logger.warning(f"Room lookup attempt {attempt+1} failed ({resp.status_code}): {resp.text[:100]}")
+            except requests.RequestException as e:
+                logger.warning(f"Room lookup attempt {attempt+1} error: {e}")
+            time.sleep(3)
+
+        if not resolved:
+            logger.error("✗ Could not resolve ROOM_ID from backend. Sensor data will NOT be forwarded.")
+    elif not room_config.room_code:
+        logger.warning("No ROOM_CODE configured — sensor data forwarding disabled")
+
     # Initialize MQTT client
     mqtt_client = mqtt.Client(
         client_id=mqtt_config.client_id,

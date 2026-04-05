@@ -106,7 +106,7 @@ services:
       MQTT_BROKER_PORT: "1883"
       BACKEND_URL: http://backend:8000
       ROOM_ID: ${ROOM_ID:-}
-      ROOM_CODE: ${ROOM_CODE:-B1-103}
+      ROOM_CODE: ${ROOM_CODE:-B1-F1-R03}
     depends_on:
       mosquitto:
         condition: service_healthy

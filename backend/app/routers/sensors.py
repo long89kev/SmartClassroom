@@ -118,3 +118,18 @@ async def get_latest_room_sensor_readings(room_id: UUID, db: Session = Depends(g
             for row in rows
         ],
     }
+
+
+@router.get("/rooms/by-code/{room_code}")
+async def get_room_by_code(room_code: str, db: Session = Depends(get_db)):
+    """Look up a room by its room_code. Used by MQTT gateway for auto-discovery."""
+    room = db.query(Room).filter(Room.room_code == room_code).first()
+    if not room:
+        raise HTTPException(status_code=404, detail=f"Room with code '{room_code}' not found")
+
+    return {
+        "room_id": str(room.id),
+        "room_code": room.room_code,
+        "name": room.name,
+        "capacity": room.capacity,
+    }

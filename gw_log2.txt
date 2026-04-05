@@ -1,0 +1,73 @@
+﻿docker : 08:47:37 [WARNING] 
+MQTTGateway: Room lookup 
+attempt 6 failed (400): Invalid 
+host header
+At line:1 char:26
++ ... eep -Seconds 15; docker 
+logs doai_mqtt_gateway --tail 
+20 2>&1 | Out-F ...
++                      ~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : N 
+   otSpecified: (08:47:37 [WAR  
+  NI...lid host header:String   
+ ) [], RemoteException
+    + FullyQualifiedErrorId : N 
+   ativeCommandError
+ 
+08:47:40 [WARNING] MQTTGateway: 
+Room lookup attempt 7 failed 
+(400): Invalid host header
+08:47:43 [WARNING] MQTTGateway: 
+Room lookup attempt 8 failed 
+(400): Invalid host header
+08:47:46 [WARNING] MQTTGateway: 
+Room lookup attempt 9 failed 
+(400): Invalid host header
+08:47:49 [WARNING] MQTTGateway: 
+Room lookup attempt 10 failed 
+(400): Invalid host header
+08:47:52 [ERROR] MQTTGateway: 
+Ô£ù Could not resolve ROOM_ID 
+from backend. Sensor data will 
+NOT be forwarded.
+08:47:52 [INFO] MQTTGateway: 
+Connecting to MQTT broker...
+08:47:52 [INFO] MQTTGateway: 
+Ô£ô Backend poll thread started
+08:47:52 [INFO] MQTTGateway: 
+Ô£ô Device control thread 
+started
+08:47:52 [INFO] MQTTGateway: 
+Ô£ô MQTT gateway running ÔÇö 
+press Ctrl+C to stop
+08:47:52 [INFO] MQTTGateway: 
+Ô£ô Connected to MQTT broker
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/temperature
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/humidity
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/light
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/occupancy
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/status/heartbeat
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/status
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/heartbeat
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/frame_ready
+08:47:52 [INFO] MQTTGateway:   
+Subscribed: classroom/actuators/
+relay/+/state

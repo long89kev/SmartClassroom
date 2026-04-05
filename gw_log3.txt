@@ -1,0 +1,72 @@
+﻿docker : 08:52:04 [INFO] 
+MQTTGateway:   MQTT Broker : 
+mosquitto:1883
+At line:1 char:26
++ ... eep -Seconds 10; docker 
+logs doai_mqtt_gateway --tail 
+20 2>&1 | Out-F ...
++                      ~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : N 
+   otSpecified: (08:52:04 [INF  
+  O]... mosquitto:1883:String   
+ ) [], RemoteException
+    + FullyQualifiedErrorId : N 
+   ativeCommandError
+ 
+08:52:04 [INFO] MQTTGateway:   
+Backend     : 
+http://backend:8000/api
+08:52:04 [INFO] MQTTGateway:   
+Room        : B1-F1-R03 (not 
+set)
+08:52:04 [INFO] MQTTGateway: ===
+================================
+=========================
+08:52:04 [INFO] MQTTGateway: 
+ROOM_ID not set ÔÇö resolving 
+from backend using 
+ROOM_CODE=B1-F1-R03...
+08:52:04 [INFO] MQTTGateway: 
+Ô£ô Resolved ROOM_ID: 00f0113a-3
+4c2-4dc4-8411-40f37ba9c859
+08:52:04 [INFO] MQTTGateway: 
+Connecting to MQTT broker...
+08:52:04 [INFO] MQTTGateway: 
+Ô£ô Backend poll thread started
+08:52:04 [INFO] MQTTGateway: 
+Ô£ô Device control thread 
+started
+08:52:04 [INFO] MQTTGateway: 
+Ô£ô MQTT gateway running ÔÇö 
+press Ctrl+C to stop
+08:52:04 [INFO] MQTTGateway: 
+Ô£ô Connected to MQTT broker
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/temperature
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/humidity
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/light
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/sensors/occupancy
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/status/heartbeat
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/status
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/heartbeat
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: 
+classroom/camera/frame_ready
+08:52:04 [INFO] MQTTGateway:   
+Subscribed: classroom/actuators/
+relay/+/state

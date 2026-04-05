@@ -268,7 +268,7 @@ export function BuildingDashboardPage(): JSX.Element {
     }
 
     return {
-      LIGHT: readingFor(['OCCUPANCY']),
+      LIGHT: readingFor(['LIGHT']),
       AC: readingFor(['TEMPERATURE', 'TEMP']),
       FAN: readingFor(['HUMIDITY']),
       CAMERA: '-',

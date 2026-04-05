@@ -34,7 +34,7 @@ class BackendConfig:
 class RoomConfig:
     """Room-to-device mapping for the classroom."""
     room_id: str = os.getenv("ROOM_ID", "")  # UUID from database
-    room_code: str = os.getenv("ROOM_CODE", "B1-103")
+    room_code: str = os.getenv("ROOM_CODE", "B1-F1-R03")
 
     # Device ID → Relay channel mapping
     device_relay_map: Dict[str, int] = field(default_factory=lambda: {
