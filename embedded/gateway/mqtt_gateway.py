@@ -91,6 +91,11 @@ def on_message(client, userdata, msg):
             controller.on_humidity(value)
             upsert_sensor_reading_in_backend("HUMIDITY", value, data.get("unit", "%"), topic)
 
+        elif topic == Topics.LIGHT and data:
+            value = data.get("value", 0.0)
+            controller.on_light(value)
+            upsert_sensor_reading_in_backend("LIGHT", value, data.get("unit", "%"), topic)
+
         elif topic == Topics.OCCUPANCY and data:
             count = data.get("count", 0)
             detected = data.get("detected", False)

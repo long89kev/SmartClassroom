@@ -24,6 +24,7 @@ class RoomState:
     """Current state of the classroom."""
     temperature: float = 0.0
     humidity: float = 0.0
+    light: float = 0.0
     is_occupied: bool = False
     occupancy_count: int = 0
     mode: str = "IDLE"              # IDLE, NORMAL, TESTING
@@ -65,16 +66,21 @@ class DeviceController:
     # ─── Sensor Update Handlers ──────────────────────────
 
     def on_temperature(self, value: float):
-        """Handle temperature reading from DHT20."""
+        """Handle temperature reading from DHT22."""
         self.state.temperature = value
         self.state.last_sensor_update = time.time()
         logger.debug(f"Temperature updated: {value}°C")
         self._evaluate_hvac()
 
     def on_humidity(self, value: float):
-        """Handle humidity reading from DHT20."""
+        """Handle humidity reading from DHT22."""
         self.state.humidity = value
         logger.debug(f"Humidity updated: {value}%")
+
+    def on_light(self, value: float):
+        """Handle light reading."""
+        self.state.light = value
+        logger.debug(f"Light updated: {value}%")
 
     def on_occupancy(self, count: int, detected: bool):
         """Handle occupancy detection update."""
@@ -339,6 +345,7 @@ class DeviceController:
             "mode": self.state.mode,
             "temperature": self.state.temperature,
             "humidity": self.state.humidity,
+            "light": self.state.light,
             "is_occupied": self.state.is_occupied,
             "occupancy_count": self.state.occupancy_count,
             "relay_states": {

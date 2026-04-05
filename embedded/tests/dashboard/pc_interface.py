@@ -7,23 +7,25 @@ import json
 # CONFIGURATION
 # Match this to your ESP32's config.h
 # ==========================================
-MQTT_BROKER = "192.168.43.219" 
+MQTT_BROKER = "192.168.43.234" 
 MQTT_PORT = 1883
 
 TOPIC_TEMP   = "classroom/sensors/temperature"
 TOPIC_HUM    = "classroom/sensors/humidity"
-TOPIC_RELAYS = [
+TOPIC_LIGHT  = "classroom/sensors/light"
+TOPIC_ACTUATORS = [
     "classroom/actuators/relay/1",
     "classroom/actuators/relay/2",
     "classroom/actuators/relay/3",
     "classroom/actuators/relay/4",
+    "classroom/actuators/buzzer",
 ]
 
 class SmartClassroomInterface:
     def __init__(self, root):
         self.root = root
         self.root.title("Smart Classroom Controller")
-        self.root.geometry("450x380")
+        self.root.geometry("450x430")
         self.root.configure(bg="#1E1E2E") # Very dark aesthetic blue/grey
         
         # Aesthetics & Styling
@@ -39,10 +41,13 @@ class SmartClassroomInterface:
         sensor_frame.pack(fill="x", padx=25, pady=5)
         
         self.lbl_temp = tk.Label(sensor_frame, text="🌡️ Temp: -- °C", font=font_main, bg="#313244", fg="#F38BA8")
-        self.lbl_temp.pack(side="left", padx=15, pady=15, expand=True)
+        self.lbl_temp.pack(side="left", padx=5, pady=15, expand=True)
         
         self.lbl_hum = tk.Label(sensor_frame, text="💧 Humidity: -- %", font=font_main, bg="#313244", fg="#89B4FA")
-        self.lbl_hum.pack(side="right", padx=15, pady=15, expand=True)
+        self.lbl_hum.pack(side="left", padx=5, pady=15, expand=True)
+        
+        self.lbl_light = tk.Label(sensor_frame, text="☀️ Light: -- %", font=font_main, bg="#313244", fg="#F9E2AF")
+        self.lbl_light.pack(side="left", padx=5, pady=15, expand=True)
         
         # Actuator Controls Panel
         tk.Label(root, text="Control Panel", font=font_main, bg="#1E1E2E", fg="#A6ADC8").pack(pady=(15, 5))
@@ -52,10 +57,10 @@ class SmartClassroomInterface:
         
         # Create buttons
         self.buttons = []
-        self.states = [False, False, False, False]
-        labels = ["LED Zone 1", "LED Zone 2", "LED Zone 3", "Fan"]
+        self.states = [False, False, False, False, False]
+        labels = ["LED Zone 1", "LED Zone 2", "LED Zone 3", "Fan", "Buzzer"]
         
-        for i in range(4):
+        for i in range(5):
             btn = tk.Button(
                 control_frame, 
                 text=f"{labels[i]}: OFF", 
@@ -97,9 +102,9 @@ class SmartClassroomInterface:
     def toggle_actuator(self, idx):
         # Toggle mathematical state
         self.states[idx] = not self.states[idx]
-        new_state = "ON" if self.states[idx] else "OFF"
+        new_state = "OFF" if self.states[idx] else "ON"
         
-        labels = ["LED Zone 1", "LED Zone 2", "LED Zone 3", "Fan"]
+        labels = ["LED Zone 1", "LED Zone 2", "LED Zone 3", "Fan", "Buzzer"]
         
         # Dynamic aesthetic colors (Green for ON, Grey/Dark for OFF)
         color_bg = "#A6E3A1" if self.states[idx] else "#45475A"
@@ -111,7 +116,7 @@ class SmartClassroomInterface:
         # Publish MQTT command directly to the node
         # Inverting the payload because the physical relays operate oppositely (Active LOW or NC wiring)
         mqtt_payload = "OFF" if self.states[idx] else "ON"
-        self.client.publish(TOPIC_RELAYS[idx], mqtt_payload)
+        self.client.publish(TOPIC_ACTUATORS[idx], mqtt_payload)
 
     def on_connect(self, client, userdata, flags, result_code, properties=None):
         # result_code indicates success. Compatibility signature.
@@ -121,6 +126,7 @@ class SmartClassroomInterface:
             # Subscribe to the ESP32 sensor topic streams
             client.subscribe(TOPIC_TEMP)
             client.subscribe(TOPIC_HUM)
+            client.subscribe(TOPIC_LIGHT)
         else:
             self.root.after(0, lambda: self.lbl_status.config(text="❌ Failed to connect", fg="#F38BA8"))
 
@@ -136,6 +142,8 @@ class SmartClassroomInterface:
                 self.root.after(0, lambda: self.lbl_temp.config(text=f"🌡️ Temp: {val} °C"))
             elif msg.topic == TOPIC_HUM:
                 self.root.after(0, lambda: self.lbl_hum.config(text=f"💧 Humidity: {val} %"))
+            elif msg.topic == TOPIC_LIGHT:
+                self.root.after(0, lambda: self.lbl_light.config(text=f"☀️ Light: {val} %"))
         except:
             pass
 

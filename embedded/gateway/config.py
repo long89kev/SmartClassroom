@@ -61,6 +61,7 @@ class Topics:
     # Sensor topics (ESP32 → Gateway)
     TEMPERATURE = "classroom/sensors/temperature"
     HUMIDITY = "classroom/sensors/humidity"
+    LIGHT = "classroom/sensors/light"
     OCCUPANCY = "classroom/sensors/occupancy"
 
     # Actuator topics (Gateway → ESP32)
@@ -92,6 +93,7 @@ class Topics:
         return [
             cls.TEMPERATURE,
             cls.HUMIDITY,
+            cls.LIGHT,
             cls.OCCUPANCY,
             cls.HEARTBEAT,
             cls.CAM_STATUS,

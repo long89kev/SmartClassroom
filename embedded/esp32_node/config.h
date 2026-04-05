@@ -13,7 +13,7 @@
 #define WIFI_PASSWORD "08092005long"
 
 // ─── MQTT Broker (Mosquitto in Docker) ──────────────────
-#define MQTT_BROKER_IP "192.168.43.219" // IP of the machine running Docker
+#define MQTT_BROKER_IP "192.168.43.234" // IP of the machine running Docker
 #define MQTT_BROKER_PORT 1883
 #define MQTT_CLIENT_ID "esp32_sensor_node"
 #define MQTT_USERNAME "" // Leave empty if anonymous
@@ -23,6 +23,7 @@
 // Publish (ESP32 → Broker)
 #define TOPIC_TEMPERATURE "classroom/sensors/temperature"
 #define TOPIC_HUMIDITY "classroom/sensors/humidity"
+#define TOPIC_LIGHT "classroom/sensors/light"
 #define TOPIC_HEARTBEAT "classroom/status/heartbeat"
 
 // Subscribe (Broker → ESP32)
@@ -46,8 +47,12 @@
 // Buzzer
 #define BUZZER_PIN 32
 
-// DHT20 Sensor (I2C)
-// Uses default I2C: SDA = GPIO 21, SCL = GPIO 22
+// DHT22 Sensor
+#define DHT_PIN 4
+#define DHT_TYPE DHT22
+
+// Light Sensor
+#define LIGHT_SENSOR_PIN 34
 
 // LCD 16x2 (I2C)
 // Shares I2C bus: SDA = GPIO 21, SCL = GPIO 22
@@ -56,7 +61,7 @@
 #define LCD_ROWS 2
 
 // ─── Timing Configuration ───────────────────────────────
-#define SENSOR_READ_INTERVAL_MS 1000 // Read DHT20 every 5 seconds
+#define SENSOR_READ_INTERVAL_MS 2000 // Read DHT22 every 2 seconds
 #define HEARTBEAT_INTERVAL_MS 30000  // Heartbeat every 30 seconds
 #define MQTT_RECONNECT_DELAY_MS 5000 // Retry MQTT connection every 5s
 #define WIFI_RECONNECT_DELAY_MS 5000 // Retry WiFi every 5s

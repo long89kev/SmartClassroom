@@ -110,8 +110,8 @@ This starts: PostgreSQL, Redis, Mosquitto, Backend, Frontend, and MQTT Gateway.
 
 | Topic | Direction | Payload | Description |
 |-------|-----------|---------|-------------|
-| `classroom/sensors/temperature` | ESP32 → GW | `{"value": 28.5, "unit": "C"}` | DHT20 temp |
-| `classroom/sensors/humidity` | ESP32 → GW | `{"value": 65.0, "unit": "%"}` | DHT20 humidity |
+| `classroom/sensors/temperature` | ESP32 → GW | `{"value": 28.5, "unit": "C"}` | DHT22 temp |
+| `classroom/sensors/humidity` | ESP32 → GW | `{"value": 65.0, "unit": "%"}` | DHT22 humidity |
 | `classroom/sensors/occupancy` | ESP32 → GW | `{"count": 5, "detected": true}` | Room occupancy |
 | `classroom/actuators/relay/1` | GW → ESP32 | `"ON"` / `"OFF"` | LED Zone 1 |
 | `classroom/actuators/relay/2` | GW → ESP32 | `"ON"` / `"OFF"` | LED Zone 2 |

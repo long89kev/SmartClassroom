@@ -1,9 +1,9 @@
 /*
  * esp32_node.ino — Smart AI-IoT Classroom Sensor/Actuator Node
- * 
+ *
  * Hardware:
  *   - ESP32 DevKit V1
- *   - DHT20 (I2C) — Temperature & Humidity sensor
+ *   - DHT22 (1-Wire) — Temperature & Humidity sensor
  *   - 4-Channel Relay Module (Active LOW)
  *   - 16x2 I2C LCD Display
  *   - 5V Buzzer
@@ -14,29 +14,31 @@
  * Required Libraries (install via Arduino Library Manager):
  *   - WiFi (built-in)
  *   - PubSubClient by Nick O'Leary
- *   - DHT20 by Rob Tillaart
+ *   - DHT sensor library by Adafruit
+ *   - Adafruit Unified Sensor
  *   - LiquidCrystal_I2C by Frank de Brabander
  *   - ArduinoJson by Benoit Blanchon
  *   - Wire (built-in)
  */
 
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <Wire.h>
-#include <DHT20.h>
-#include <LiquidCrystal_I2C.h>
-#include <ArduinoJson.h>
 #include "config.h"
+#include <ArduinoJson.h>
+#include <DHT.h>
+#include <LiquidCrystal_I2C.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+#include <Wire.h>
 
 // ─── Global Objects ─────────────────────────────────────
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
-DHT20 dht20;
+DHT dht(DHT_PIN, DHT_TYPE);
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 // ─── State Variables ────────────────────────────────────
 float currentTemp = 0.0;
 float currentHumidity = 0.0;
+float currentLight = 0.0;
 String currentMode = "IDLE";
 bool relayStates[4] = {false, false, false, false};
 unsigned long lastSensorRead = 0;
@@ -49,7 +51,7 @@ String lcdLine2 = "Initializing...";
 // ─── Function Declarations ──────────────────────────────
 void setupWiFi();
 void setupMQTT();
-void mqttCallback(char* topic, byte* payload, unsigned int length);
+void mqttCallback(char *topic, byte *payload, unsigned int length);
 void reconnectMQTT();
 void readSensors();
 void publishSensorData();
@@ -72,9 +74,9 @@ void setup() {
   // Initialize I2C
   Wire.begin();
 
-  // Initialize DHT20
-  dht20.begin();
-  Serial.println("[SENSOR] DHT20 initialized (I2C)");
+  // Initialize DHT22
+  dht.begin();
+  Serial.println("[SENSOR] DHT22 initialized");
 
   // Initialize LCD
   lcd.init();
@@ -89,7 +91,7 @@ void setup() {
   int relayPins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
   for (int i = 0; i < 4; i++) {
     pinMode(relayPins[i], OUTPUT);
-    digitalWrite(relayPins[i], HIGH);  // HIGH = OFF for active-low relay
+    digitalWrite(relayPins[i], HIGH); // HIGH = OFF for active-low relay
   }
   Serial.println("[RELAY] 4-channel relay initialized (all OFF)");
 
@@ -97,6 +99,10 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
   Serial.println("[BUZZER] Buzzer initialized");
+
+  // Initialize Light Sensor
+  pinMode(LIGHT_SENSOR_PIN, INPUT);
+  Serial.println("[SENSOR] Light sensor initialized");
 
   // Connect WiFi
   setupWiFi();
@@ -173,7 +179,7 @@ void setupWiFi() {
 void setupMQTT() {
   mqtt.setServer(MQTT_BROKER_IP, MQTT_BROKER_PORT);
   mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(512);  // Increase for JSON payloads
+  mqtt.setBufferSize(512); // Increase for JSON payloads
   reconnectMQTT();
 }
 
@@ -215,7 +221,7 @@ void reconnectMQTT() {
 }
 
 // ─── MQTT Callback (Incoming Messages) ─────────────────
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
   // Convert payload to string
   String message;
   for (unsigned int i = 0; i < length; i++) {
@@ -251,18 +257,30 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   // Handle LCD text
   else if (topicStr == TOPIC_LCD_LINE1) {
     lcdLine1 = message.substring(0, LCD_COLS);
-  }
-  else if (topicStr == TOPIC_LCD_LINE2) {
+  } else if (topicStr == TOPIC_LCD_LINE2) {
     lcdLine2 = message.substring(0, LCD_COLS);
   }
 }
 
 // ─── Sensor Reading ─────────────────────────────────────
 void readSensors() {
-  int status = dht20.read();
-  if (status == DHT20_OK) {
-    currentTemp = dht20.getTemperature();
-    currentHumidity = dht20.getHumidity();
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+
+  int rawLight = analogRead(LIGHT_SENSOR_PIN);
+  currentLight = (rawLight / 4095.0) * 100.0;
+  Serial.print("%  Light: ");
+  Serial.println(currentLight, 1);
+
+  if (currentLight >= 80.0) {
+    setRelay(1, true);
+    setRelay(2, true);
+    setRelay(3, true);
+  }
+
+  if (!isnan(t) && !isnan(h)) {
+    currentTemp = t;
+    currentHumidity = h;
 
     Serial.print("[SENSOR] Temp: ");
     Serial.print(currentTemp, 1);
@@ -270,8 +288,7 @@ void readSensors() {
     Serial.print(currentHumidity, 1);
     Serial.println("%");
   } else {
-    Serial.print("[SENSOR] DHT20 read error: ");
-    Serial.println(status);
+    Serial.println("[SENSOR] DHT22 read error");
   }
 }
 
@@ -294,6 +311,15 @@ void publishSensorData() {
   char humBuf[128];
   serializeJson(humDoc, humBuf);
   mqtt.publish(TOPIC_HUMIDITY, humBuf);
+
+  // Publish light
+  StaticJsonDocument<128> lightDoc;
+  lightDoc["value"] = round(currentLight * 10.0) / 10.0;
+  lightDoc["unit"] = "%";
+  lightDoc["ts"] = millis();
+  char lightBuf[128];
+  serializeJson(lightDoc, lightBuf);
+  mqtt.publish(TOPIC_LIGHT, lightBuf);
 }
 
 // ─── Publish Heartbeat ──────────────────────────────────
@@ -304,6 +330,7 @@ void publishHeartbeat() {
   doc["rssi"] = WiFi.RSSI();
   doc["temp"] = currentTemp;
   doc["humidity"] = currentHumidity;
+  doc["light"] = currentLight;
   doc["mode"] = currentMode;
   doc["free_heap"] = ESP.getFreeHeap();
 
@@ -329,7 +356,8 @@ void handleRelayCommand(int channel, String command) {
 }
 
 void setRelay(int channel, bool state) {
-  if (channel < 1 || channel > 4) return;
+  if (channel < 1 || channel > 4)
+    return;
 
   int pins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
   int pin = pins[channel - 1];
@@ -338,7 +366,8 @@ void setRelay(int channel, bool state) {
   digitalWrite(pin, state ? LOW : HIGH);
   relayStates[channel - 1] = state;
 
-  const char* deviceNames[] = {"LED Zone 1", "LED Zone 2", "LED Zone 3", "DC Fan 1"};
+  const char *deviceNames[] = {"LED Zone 1", "LED Zone 2", "LED Zone 3",
+                               "DC Fan 1"};
   Serial.print("[RELAY] ");
   Serial.print(deviceNames[channel - 1]);
   Serial.print(" (CH");
@@ -368,7 +397,7 @@ void triggerBuzzer(int repeats, int durationMs) {
     delay(durationMs);
     digitalWrite(BUZZER_PIN, LOW);
     if (i < repeats - 1) {
-      delay(durationMs);  // Gap between beeps
+      delay(durationMs); // Gap between beeps
     }
   }
 }
@@ -403,7 +432,8 @@ void updateLCD() {
   lcd.setCursor(0, 0);
   String line1 = lcdLine1;
   // Pad to 16 chars to clear old text
-  while (line1.length() < LCD_COLS) line1 += " ";
+  while (line1.length() < LCD_COLS)
+    line1 += " ";
   lcd.print(line1.substring(0, LCD_COLS));
 
   // Line 2: Sensor data or custom text
@@ -415,6 +445,7 @@ void updateLCD() {
   } else {
     line2 = lcdLine2;
   }
-  while (line2.length() < LCD_COLS) line2 += " ";
+  while (line2.length() < LCD_COLS)
+    line2 += " ";
   lcd.print(line2.substring(0, LCD_COLS));
 }
