@@ -6,45 +6,21 @@
 |-----------|----------|---------|
 | AI-Thinker ESP32-CAM | 1 | Camera + WiFi MCU |
 | OV2640 Camera Module | 1 | Usually included with ESP32-CAM |
-| FTDI USB-to-Serial Adapter (3.3V) | 1 | For programming (ESP32-CAM has no USB) |
-| Jumper wires | — | Connections |
+| ESP32-CAM MB HW-381 | 1 | Motherboard / USB Programmer for ESP32-CAM |
+| Micro-USB Cable | 1 | For programming and power |
 
-## Board Pinout (AI-Thinker ESP32-CAM)
+## Board Pinout & Connection (MB HW-381)
 
-```
-       ┌───────────────────────┐
-       │     ESP32-CAM         │
-       │   (AI-Thinker)        │
-       │                       │
-       │  5V ─── FTDI 5V       │
-       │  GND ── FTDI GND      │
-       │  U0R ── FTDI TX       │
-       │  U0T ── FTDI RX       │
-       │                       │
-       │  IO0 ── GND           │  ← Connect during upload ONLY
-       │                       │
-       │  GPIO4 = Flash LED    │  (built-in)
-       │                       │
-       │  ┌─────────┐          │
-       │  │ OV2640  │          │
-       │  │ Camera  │          │
-       │  └─────────┘          │
-       └───────────────────────┘
-```
+Because you are using the **ESP32-CAM MB HW-381 motherboard**, you do not need manual FTDI wiring or jumper cables.
 
-### Programming Connection
-```
-FTDI Adapter        ESP32-CAM
-────────────        ─────────
-5V           ──────  5V
-GND          ──────  GND
-TX           ──────  U0R
-RX           ──────  U0T
+1. **Insert ESP32-CAM**: Align the pins of the ESP32-CAM into the female headers of the MB HW-381 board. The camera should face outward, away from the motherboard.
+2. **Connect to PC**: Plug a Micro-USB cable into the MB HW-381 and connect it to your computer.
 
-                     IO0 ──── GND  (only during upload!)
-```
-
-> **Important**: Remove the IO0 → GND jumper AFTER uploading, then press the RST button to boot normally.
+The MB HW-381 board includes a CH340 USB-to-serial chip and an auto-download circuit. This means:
+* No FTDI adapter required.
+* No manual `IO0` to `GND` connections.
+* No need to manually press the `RST` button to upload (in most cases).
+* The board safely regulates power to the ESP32-CAM.
 
 ## Software Setup
 
@@ -79,16 +55,15 @@ Edit `config.h`:
 | Flash Frequency | 80MHz |
 | Flash Mode | QIO |
 | Partition Scheme | Huge APP (3MB No OTA / 1MB SPIFFS) |
-| Port | Your FTDI COM port |
+| Port | Your CH340 COM port (from MB HW-381) |
 
 ### 5. Upload
-1. Connect IO0 → GND (enter programming mode)
-2. Press RST button on ESP32-CAM
-3. Click **Upload** in Arduino IDE
-4. Wait for "Connecting....." then upload completes
-5. **Disconnect IO0 from GND**
-6. Press RST to reboot into normal mode
-7. Open Serial Monitor at 115200 baud
+1. Click **Upload** in Arduino IDE
+2. The MB HW-381 auto-download circuit will automatically put the board into programming mode and reset it.
+3. Wait for the upload to complete.
+4. *Note: If the IDE gets stuck on "Connecting.....", briefly press the **BOOT** (or **IO0**) button on the MB HW-381 board.*
+5. Open Serial Monitor at 115200 baud
+6. Press the **RST** button on the MB HW-381 if the program doesn't start automatically.
 
 ## Endpoints
 
@@ -153,8 +128,8 @@ docker exec doai_mosquitto mosquitto_pub -t "classroom/mode" -m "TESTING"
 | Issue | Solution |
 |-------|----------|
 | Camera init failed (0x20001) | Check camera ribbon cable; ensure correct pin definitions |
-| Brownout / rebooting | Insufficient power — use a good 5V/2A supply, not just FTDI |
+| Brownout / rebooting | Verify your USB cable is data+power capable and plugged into a good USB port (MB HW-381 usually solves power issues). |
 | No PSRAM detected | Ensure partition scheme is "Huge APP"; some clone boards lack PSRAM |
 | Blurry images | Allow camera warm-up; adjust `set_quality` in config |
-| Can't upload | Ensure IO0 is connected to GND; press RST before upload |
+| Can't upload | If stuck on "Connecting...", press the BOOT/IO0 button on the MB HW-381. Make sure you installed the CH340 driver. |
 | Stream laggy | Reduce `FRAME_SIZE` to `FRAMESIZE_CIF` (400×296) |
