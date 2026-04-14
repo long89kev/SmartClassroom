@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     AttendanceEvent,
+    AttendanceFaceTemplate,
     AttendanceSessionConfig,
     ClassSession,
     Enrollment,
@@ -20,6 +21,7 @@ from app.routers.auth import get_current_user, get_user_room_scope
 from app.schemas.common import (
     AttendanceConfigUpsert,
     AttendanceDailyRoomSummary,
+    AttendanceEventIngest,
     AttendanceMockEventIngest,
     AttendanceSessionReport,
     AttendanceStudentHistoryEntry,
@@ -206,6 +208,111 @@ async def ingest_mock_attendance_event(
         "grace_minutes": config.grace_minutes,
         "min_confidence": config.min_confidence,
     }
+
+
+@router.post("/sessions/{session_id}/events/ingest")
+async def ingest_attendance_event(
+    session_id: UUID,
+    payload: AttendanceEventIngest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Real attendance event ingest endpoint.
+    Called by the PC attendance service (USB webcam face recognition).
+    Accepts LECTURER, SYSTEM_ADMIN, or EXAM_PROCTOR roles.
+    """
+    if current_user.role not in {"LECTURER", "SYSTEM_ADMIN", "EXAM_PROCTOR"}:
+        raise HTTPException(status_code=403, detail="Insufficient role for attendance ingest")
+
+    session = _get_session_or_404(db, session_id)
+
+    if session.subject_id is None:
+        raise HTTPException(status_code=400, detail="Session subject is required for attendance")
+
+    # Resolve student by student_id
+    student = db.query(Student).filter(Student.id == payload.student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Verify enrollment
+    enrollment_exists = (
+        db.query(Enrollment)
+        .filter(Enrollment.subject_id == session.subject_id, Enrollment.student_id == payload.student_id)
+        .first()
+    )
+    if not enrollment_exists:
+        raise HTTPException(status_code=400, detail="Student is not enrolled in this session subject")
+
+    config = _get_or_create_attendance_config(db, session_id)
+    is_recognized = config.auto_checkin_enabled and payload.face_confidence >= config.min_confidence
+
+    event = AttendanceEvent(
+        session_id=session_id,
+        student_id=payload.student_id,
+        source=payload.source or "USB_WEBCAM",
+        face_confidence=payload.face_confidence,
+        is_recognized=is_recognized,
+        occurred_at=payload.occurred_at or datetime.utcnow(),
+        event_metadata=payload.metadata or {},
+        created_by_user_id=current_user.id,
+    )
+
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    # Derive current status for this student
+    cutoff = session.start_time + timedelta(minutes=config.grace_minutes)
+    if event.occurred_at <= cutoff:
+        status = "PRESENT"
+    else:
+        status = "LATE"
+
+    return {
+        "event_id": str(event.id),
+        "session_id": str(session_id),
+        "student_id": str(payload.student_id),
+        "student_code": student.student_id,
+        "student_name": student.name,
+        "recognized": event.is_recognized,
+        "status": status,
+        "grace_minutes": config.grace_minutes,
+        "min_confidence": config.min_confidence,
+    }
+
+
+@router.get("/face-templates/students")
+async def list_face_template_students(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List all students that have active face templates.
+    Used by the attendance service to build student_code -> student_id mapping.
+    """
+    _ensure_attendance_role(current_user)
+
+    students_with_templates = (
+        db.query(Student)
+        .join(AttendanceFaceTemplate, AttendanceFaceTemplate.student_id == Student.id)
+        .filter(AttendanceFaceTemplate.is_active.is_(True))
+        .distinct()
+        .all()
+    )
+
+    # Also include all students even without templates (for the PC service mapping)
+    all_students = db.query(Student).all()
+
+    return [
+        {
+            "student_id": str(s.id),
+            "student_code": s.student_id,
+            "name": s.name,
+            "has_template": any(t.student_id == s.id for t in students_with_templates) if students_with_templates else False,
+        }
+        for s in all_students
+    ]
 
 
 @router.get("/sessions/{session_id}", response_model=AttendanceSessionReport)

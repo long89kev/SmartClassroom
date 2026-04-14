@@ -155,6 +155,15 @@ class AttendanceMockEventIngest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AttendanceEventIngest(BaseModel):
+    """Real attendance event from the PC webcam face recognition service."""
+    student_id: UUID
+    face_confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    occurred_at: Optional[datetime] = None
+    source: str = "USB_WEBCAM"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AttendanceStudentStatus(BaseModel):
     student_id: UUID
     student_code: str

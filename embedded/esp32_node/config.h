@@ -9,11 +9,11 @@
 #define CONFIG_H
 
 // ─── WiFi Configuration ─────────────────────────────────
-#define WIFI_SSID "Hcmut4"
-#define WIFI_PASSWORD "08092005long"
+#define WIFI_SSID "Hoang Tam Long"
+#define WIFI_PASSWORD "33110035"
 
 // ─── MQTT Broker (Mosquitto in Docker) ──────────────────
-#define MQTT_BROKER_IP "192.168.43.234" // IP of the machine running Docker
+#define MQTT_BROKER_IP "192.168.1.104" // IP of the machine running Docker
 #define MQTT_BROKER_PORT 1883
 #define MQTT_CLIENT_ID "esp32_sensor_node"
 #define MQTT_USERNAME "" // Leave empty if anonymous
@@ -32,7 +32,7 @@
 #define TOPIC_RELAY_2 "classroom/actuators/relay/2"
 #define TOPIC_RELAY_3 "classroom/actuators/relay/3"
 #define TOPIC_RELAY_4 "classroom/actuators/relay/4"
-#define TOPIC_BUZZER "classroom/actuators/buzzer"
+#define TOPIC_ALERT_LED "classroom/actuators/alert_led"
 #define TOPIC_MODE "classroom/mode"
 #define TOPIC_LCD_LINE1 "classroom/display/line1"
 #define TOPIC_LCD_LINE2 "classroom/display/line2"
@@ -44,12 +44,11 @@
 #define RELAY_3_PIN 27 // LED Zone 3
 #define RELAY_4_PIN 14 // DC Fan 1
 
-// Buzzer
-#define BUZZER_PIN 32
+// Alert LED
+#define ALERT_LED_PIN 32
 
-// DHT22 Sensor
-#define DHT_PIN 4
-#define DHT_TYPE DHT22
+// DHT20 Sensor (I2C)
+// Uses default I2C: SDA = GPIO 21, SCL = GPIO 22
 
 // Light Sensor
 #define LIGHT_SENSOR_PIN 34
@@ -61,7 +60,7 @@
 #define LCD_ROWS 2
 
 // ─── Timing Configuration ───────────────────────────────
-#define SENSOR_READ_INTERVAL_MS 2000 // Read DHT22 every 2 seconds
+#define SENSOR_READ_INTERVAL_MS 5000 // Read DHT20 every 1 second
 #define HEARTBEAT_INTERVAL_MS 30000  // Heartbeat every 30 seconds
 #define MQTT_RECONNECT_DELAY_MS 5000 // Retry MQTT connection every 5s
 #define WIFI_RECONNECT_DELAY_MS 5000 // Retry WiFi every 5s
@@ -70,7 +69,7 @@
 // ─── Device Control Thresholds ──────────────────────────
 #define TEMP_HIGH_THRESHOLD 28.0     // °C — activate fans
 #define TEMP_LOW_THRESHOLD 26.0      // °C — deactivate fans
-#define BUZZER_ALERT_DURATION_MS 500 // Buzzer beep duration
-#define BUZZER_ALERT_REPEAT 3        // Number of beeps
+#define ALERT_LED_DURATION_MS 500 // Alert LED flash duration
+#define ALERT_LED_REPEAT 3        // Number of flashes
 
 #endif // CONFIG_H

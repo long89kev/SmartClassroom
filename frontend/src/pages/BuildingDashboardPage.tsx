@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { AttendanceLivePanel } from '../components/AttendanceLivePanel'
 import {
   AlertTriangle,
   BarChart3,
@@ -1289,6 +1290,11 @@ export function BuildingDashboardPage(): JSX.Element {
             </p>
             {graceConfigMessage ? <p className="muted">{graceConfigMessage}</p> : null}
           </section>
+        ) : null}
+
+        {/* Live Attendance Panel — shown when a session is selected */}
+        {canManageAttendanceConfig && selectedSessionId ? (
+          <AttendanceLivePanel sessionId={selectedSessionId} />
         ) : null}
 
       </aside>
