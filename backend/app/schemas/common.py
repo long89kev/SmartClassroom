@@ -202,6 +202,63 @@ class AttendanceDailyRoomSummary(BaseModel):
     totals: Dict[str, int]
 
 
+class AttendanceDashboardKpiResponse(BaseModel):
+    enrolled: int
+    present: int
+    late: int
+    absent: int
+    attendance_rate: float
+    target_attendance_rate: float = 85.0
+
+
+class AttendanceDashboardBreakdownPoint(BaseModel):
+    key: str
+    label: str
+    enrolled: int
+    present: int
+    late: int
+    absent: int
+    attendance_rate: float
+
+
+class AttendanceDashboardBreakdownResponse(BaseModel):
+    dimension: Literal["session", "day_of_week", "subject"]
+    points: List[AttendanceDashboardBreakdownPoint] = Field(default_factory=list)
+
+
+class AttendanceDashboardTrendPoint(BaseModel):
+    key: str
+    label: str
+    enrolled: int
+    present: int
+    late: int
+    absent: int
+    attendance_rate: float
+
+
+class AttendanceDashboardTrendResponse(BaseModel):
+    granularity: Literal["day", "week", "month", "weekday"]
+    points: List[AttendanceDashboardTrendPoint] = Field(default_factory=list)
+
+
+class AttendanceDashboardRankingRow(BaseModel):
+    rank: int
+    scope_key: str
+    scope_label: str
+    start_time: Optional[datetime] = None
+    session_status: Optional[str] = None
+    enrolled: int
+    present: int
+    late: int
+    absent: int
+    attendance_rate: float
+
+
+class AttendanceDashboardRankingResponse(BaseModel):
+    scope: Literal["session", "room", "subject"]
+    rows: List[AttendanceDashboardRankingRow] = Field(default_factory=list)
+
+
 class StudentSessionCalendarItem(BaseModel):
     session_id: UUID
     subject_id: Optional[UUID] = None

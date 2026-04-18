@@ -42,7 +42,7 @@ class Room(Base):
     room_code = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String)
     capacity = Column(Integer, default=30)
-    devices = Column(JSON, default={"device_list": []})  # JSONB for flexible device schema
+    devices = Column(JSON, default=lambda: {"device_list": []})  # JSONB for flexible device schema
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     
@@ -546,3 +546,37 @@ class RoleModeAccess(Base):
     can_view_reports = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class AttendanceBoardThreshold(Base):
+    __tablename__ = "attendance_board_thresholds"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope_type = Column(String, nullable=False, index=True)
+    scope_id = Column(String, nullable=False, default="GLOBAL")
+    min_attendance_rate = Column(Float, nullable=False, default=85.0)
+    max_late_rate = Column(Float, nullable=False, default=10.0)
+    max_absent_rate = Column(Float, nullable=False, default=15.0)
+    note = Column(String)
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    updated_by_user = relationship("User", foreign_keys=[updated_by])
+
+    __table_args__ = (UniqueConstraint("scope_type", "scope_id", name="uq_attendance_board_threshold_scope"),)
+
+
+class AttendanceDashboardExport(Base):
+    __tablename__ = "attendance_dashboard_exports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True)
+    export_format = Column(String, nullable=False)
+    filter_payload = Column(JSON, nullable=False, default={})
+    row_count = Column(Integer, nullable=False, default=0)
+    generated_at = Column(DateTime, nullable=False, server_default=func.now())
+    status = Column(String, nullable=False, default="SUCCESS")
+    failure_reason = Column(String)
+
+    requested_by_user = relationship("User", foreign_keys=[requested_by])

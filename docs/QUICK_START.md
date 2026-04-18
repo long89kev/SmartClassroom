@@ -21,6 +21,29 @@
 
 ---
 
+## 🎥 Live Attendance Camera Stream
+
+Live camera feed is now routed through backend proxy endpoints so frontend works in both local and docker without hardcoded stream hosts.
+
+### Required runtime service
+Start attendance stream service from `embedded/attendance`:
+
+```powershell
+cd embedded\attendance
+python attendance_service.py
+```
+
+### Health checks
+- Stream service direct: `http://localhost:5051/health`
+- Backend proxy status: `http://localhost:8000/api/attendance/stream/status`
+- Backend proxy stream: `http://localhost:8000/api/attendance/stream/video_feed`
+
+### Environment knobs
+- Backend: `ATTENDANCE_SERVICE_URL` (defaults to `http://localhost:5051` locally)
+- Frontend (optional): `VITE_ATTENDANCE_STREAM_BASE_URL` (defaults to `/api/attendance/stream`)
+
+---
+
 ## 🧪 Quick Testing Commands
 
 ### 1. Initialize Admin Account

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Building2, DoorOpen, Radio, Search, ShieldAlert, Users2 } from 'lucide-react'
+import { AlertTriangle, Building2, DoorOpen, LayoutGrid, Radio, Search, ShieldAlert, Users2 } from 'lucide-react'
 import { getBuildingsOverview, getIncidents, reviewIncident } from '../services/api'
 import { usePermissions } from '../hooks/usePermissions'
 import { PERMISSIONS } from '../constants/permissions'
 import { useAuthStore } from '../store/auth'
 import type { BuildingOverview, Incident } from '../types'
+import { AdminSidebarNav } from '../components/AdminSidebarNav'
 
 type BuildingGroupKey = 'A' | 'B' | 'C' | 'LABS'
 
@@ -536,90 +537,122 @@ export function BuildingsOverviewPage(): JSX.Element {
   }
 
   return (
-    <main className="page campus-bg">
-      <header className="hero-header">
-        <p className="eyebrow">Smart Classroom Command Center</p>
-        <h1>Campus Building Grid</h1>
-        <p className="subcopy">
-          Select a group first (A, B, C, Labs), then choose a building inside that group.
-        </p>
-
-        <div className="hero-metrics">
-          <article className="stat-card">
-            <Building2 size={18} />
-            <span>{buildings.length} Buildings</span>
-          </article>
-          <article className="stat-card">
-            <Radio size={18} />
-            <span>{totalActiveSessions} Active Sessions</span>
-          </article>
-          <article className="stat-card">
-            <DoorOpen size={18} />
-            <span>{totalOnlineRooms} Rooms Online</span>
-          </article>
+    <main className="page split-layout campus-bg command-center-layout">
+      <aside className="left-sidebar panel command-side-panel">
+        <div className="sidebar-header">
+          <p className="eyebrow">Navigation</p>
+          <h1>Control Panel</h1>
+          <p className="muted">Campus-wide operations. Select a group to continue.</p>
         </div>
-      </header>
 
-      <section className="panel search-panel building-search-control">
-        <label htmlFor="building-search" className="search-label">
-          <Search size={16} />
-          Search groups by building name, code, or location
-        </label>
-        <input
-          id="building-search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Type A1, B10, C4, LAB, location, or center name"
-        />
-      </section>
+        <AdminSidebarNav active="sessions" />
+      </aside>
 
-      {isLoading && <section className="panel">Loading buildings...</section>}
-      {error && <section className="panel error-panel">{error}</section>}
+      <section className="right-content command-center-content">
+        <header className="hero-header command-hero">
+          <p className="eyebrow">Smart Classroom Platform</p>
+          <h1 className="command-title">
+            Command <span>Center</span>
+          </h1>
+          <p className="subcopy">
+            Monitor buildings, session health, and room readiness from one operations workspace.
+          </p>
 
-      {!isLoading && !error && groupSummaries.length === 0 && (
-        <section className="panel empty-state">
-          <h2>No matching building group</h2>
-          <p>Try a broader search or create sessions to populate live data.</p>
-          <div className="quick-actions">
-            <span>Quick actions:</span>
-            <ul>
-              <li>Review all incidents from the current dashboard filters.</li>
-              <li>Open a building and start a classroom session.</li>
-              <li>Validate camera feed and YOLO inference with testing mode.</li>
-            </ul>
-          </div>
-        </section>
-      )}
-
-      <section className="building-grid">
-        {groupSummaries.map((group) => {
-          const sessionTone = metricTone(group.activeSessions)
-
-          return (
-            <Link key={group.key} to={`/building-groups/${group.key}`} className="building-card group-card">
+          <div className="hero-metrics command-metrics">
+            <article className="stat-card command-metric-card">
+              <Building2 size={18} />
               <div>
-                <p className="building-code">{group.key}</p>
-                <h2>{group.title}</h2>
-                <p className="building-location">{group.description}</p>
+                <strong>{buildings.length}</strong>
+                <span>Total Buildings</span>
               </div>
+            </article>
+            <article className="stat-card command-metric-card">
+              <Radio size={18} />
+              <div>
+                <strong>{totalActiveSessions}</strong>
+                <span>Active Sessions</span>
+              </div>
+            </article>
+            <article className="stat-card command-metric-card">
+              <DoorOpen size={18} />
+              <div>
+                <strong>{totalOnlineRooms}</strong>
+                <span>Rooms Online</span>
+              </div>
+            </article>
+          </div>
+        </header>
 
-              <div className="building-kpis">
-                <div className={`kpi-chip tone-${sessionTone}`}>
-                  <span className="kpi-label">Buildings</span>
-                  <strong>{group.buildingCount}</strong>
+        <section className="panel search-panel building-search-control command-search-panel">
+          <label htmlFor="building-search" className="search-label">
+            <Search size={16} />
+            Search groups by building name, code, or location
+          </label>
+          <input
+            id="building-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Type A1, B10, C4, LAB, location, or center name"
+          />
+        </section>
+
+        {isLoading && <section className="panel">Loading buildings...</section>}
+        {error && <section className="panel error-panel">{error}</section>}
+
+        {!isLoading && !error && groupSummaries.length === 0 && (
+          <section className="panel empty-state">
+            <h2>No matching building group</h2>
+            <p>Try a broader search to show available campus groups.</p>
+          </section>
+        )}
+
+        <section className="section-title-row command-section-title">
+          <div>
+            <h2>Campus Building Groups</h2>
+            <span>Select one group to open building-level monitoring.</span>
+          </div>
+          <span className="command-result-count">
+            <LayoutGrid size={14} />
+            {groupSummaries.length} groups
+          </span>
+        </section>
+
+        <section className="building-grid command-grid">
+          {groupSummaries.map((group) => {
+            const sessionTone = metricTone(group.activeSessions)
+            const statusTone = group.activeSessions > 0 ? 'safe' : 'neutral'
+            const statusLabel = group.activeSessions > 0 ? 'Live' : 'Idle'
+
+            return (
+              <Link key={group.key} to={`/building-groups/${group.key}`} className="building-card group-card command-group-card">
+                <div className="command-card-head">
+                  <p className="building-code">{group.key}</p>
+                  <span className={`status-pill tone-${statusTone}`}>{statusLabel}</span>
                 </div>
-                <div className="kpi-chip tone-safe">
-                  <span className="kpi-label">Total Rooms</span>
-                  <strong>{group.totalRooms}</strong>
+
+                <div>
+                  <h2>{group.title}</h2>
+                  <p className="building-location">{group.description}</p>
                 </div>
-                <div className="kpi-chip tone-neutral">
-                  <span className="kpi-label">Active Sessions</span>
-                  <strong>{group.activeSessions}</strong>
+
+                <div className="building-kpis">
+                  <div className={`kpi-chip tone-${sessionTone}`}>
+                    <span className="kpi-label">Buildings</span>
+                    <strong>{group.buildingCount}</strong>
+                  </div>
+                  <div className="kpi-chip tone-safe">
+                    <span className="kpi-label">Total Rooms</span>
+                    <strong>{group.totalRooms}</strong>
+                  </div>
+                  <div className="kpi-chip tone-neutral">
+                    <span className="kpi-label">Active Sessions</span>
+                    <strong>{group.activeSessions}</strong>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          )
-        })}
+              </Link>
+            )
+          })}
+        </section>
       </section>
     </main>
   )

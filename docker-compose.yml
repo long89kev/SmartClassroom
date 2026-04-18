@@ -76,6 +76,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       MQTT_BROKER_HOST: mosquitto
       MQTT_BROKER_PORT: "1883"
+      ATTENDANCE_SERVICE_URL: ${ATTENDANCE_SERVICE_URL:-http://host.docker.internal:5051}
       JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
       DEBUG: ${DEBUG:-False}
     ports:
@@ -90,6 +91,8 @@ services:
     volumes:
       - ./backend:/app
       - ./backend/models/yolo_weights:/app/models/yolo_weights:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - doai_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

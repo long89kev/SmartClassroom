@@ -541,6 +541,37 @@ CREATE TABLE IF NOT EXISTS role_mode_access (
 );
 
 -- ============================================================================
+-- 9C. BOARD-LEVEL ATTENDANCE ANALYTICS TABLES
+-- ============================================================================
+
+-- Configurable threshold matrix for board KPI alerting by scope.
+CREATE TABLE IF NOT EXISTS attendance_board_thresholds (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  scope_type VARCHAR(20) NOT NULL CHECK (scope_type IN ('SCHOOL', 'BUILDING', 'ROOM', 'SUBJECT')),
+  scope_id VARCHAR(120) NOT NULL DEFAULT 'GLOBAL',
+  min_attendance_rate NUMERIC(5,2) NOT NULL DEFAULT 85.00 CHECK (min_attendance_rate >= 0 AND min_attendance_rate <= 100),
+  max_late_rate NUMERIC(5,2) NOT NULL DEFAULT 10.00 CHECK (max_late_rate >= 0 AND max_late_rate <= 100),
+  max_absent_rate NUMERIC(5,2) NOT NULL DEFAULT 15.00 CHECK (max_absent_rate >= 0 AND max_absent_rate <= 100),
+  note VARCHAR(255),
+  updated_by UUID REFERENCES users(id),
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(scope_type, scope_id)
+);
+
+-- Export/audit trail for attendance command center report generation.
+CREATE TABLE IF NOT EXISTS attendance_dashboard_exports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  requested_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  export_format VARCHAR(10) NOT NULL CHECK (export_format IN ('CSV', 'XLSX')),
+  filter_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  row_count INT NOT NULL DEFAULT 0,
+  generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  status VARCHAR(20) NOT NULL DEFAULT 'SUCCESS' CHECK (status IN ('SUCCESS', 'FAILED')),
+  failure_reason TEXT
+);
+
+-- ============================================================================
 -- 10. INDEXES (For performance optimization)
 -- ============================================================================
 
@@ -596,6 +627,9 @@ CREATE INDEX idx_user_room_assignments_room_id ON user_room_assignments(room_id)
 CREATE INDEX idx_user_block_assignments_user_id ON user_block_assignments(user_id);
 CREATE INDEX idx_user_block_assignments_floor_id ON user_block_assignments(floor_id);
 CREATE INDEX idx_role_mode_access_role ON role_mode_access(role);
+CREATE INDEX idx_attendance_board_thresholds_scope ON attendance_board_thresholds(scope_type, scope_id);
+CREATE INDEX idx_attendance_dashboard_exports_requested_by ON attendance_dashboard_exports(requested_by);
+CREATE INDEX idx_attendance_dashboard_exports_generated_at ON attendance_dashboard_exports(generated_at);
 
 -- ============================================================================
 -- 11. SEED DATA (Initial setup)
@@ -643,6 +677,31 @@ VALUES
   (gen_random_uuid(), 'GROUP', 'LABS', 'TESTING', 2000, NULL, NOW(), NOW())
 ON CONFLICT (scope_type, scope_id, mode) DO UPDATE SET
   interval_ms = EXCLUDED.interval_ms,
+  updated_at = NOW();
+
+-- Board-level attendance KPI default thresholds
+INSERT INTO attendance_board_thresholds (
+  id,
+  scope_type,
+  scope_id,
+  min_attendance_rate,
+  max_late_rate,
+  max_absent_rate,
+  note,
+  updated_by,
+  created_at,
+  updated_at
+)
+VALUES
+  (gen_random_uuid(), 'SCHOOL', 'GLOBAL', 85.00, 10.00, 15.00, 'Default school-wide attendance threshold', NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'BUILDING', 'A', 86.00, 9.00, 14.00, 'Building A baseline threshold', NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'BUILDING', 'B', 84.00, 11.00, 16.00, 'Building B baseline threshold', NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'BUILDING', 'C', 84.00, 11.00, 16.00, 'Building C baseline threshold', NULL, NOW(), NOW())
+ON CONFLICT (scope_type, scope_id) DO UPDATE SET
+  min_attendance_rate = EXCLUDED.min_attendance_rate,
+  max_late_rate = EXCLUDED.max_late_rate,
+  max_absent_rate = EXCLUDED.max_absent_rate,
+  note = EXCLUDED.note,
   updated_at = NOW();
 
 -- ============================================================================

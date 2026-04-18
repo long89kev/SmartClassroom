@@ -1,10 +1,16 @@
 import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
-import { BrowserRouter as Router, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter as Router, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Activity } from 'lucide-react'
 import './App.css'
 import { BuildingsOverviewPage } from './pages/BuildingsOverviewPage'
 import { BuildingGroupPage } from './pages/BuildingGroupPage'
+import { DevicesGroupsOverviewPage } from './pages/DevicesGroupsOverviewPage'
+import { DevicesGroupPage } from './pages/DevicesGroupPage'
 import { BuildingDashboardPage } from './pages/BuildingDashboardPage'
+import { BuildingSessionsPage } from './pages/BuildingSessionsPage'
+import { BuildingDevicesPage } from './pages/BuildingDevicesPage'
+import { AttendanceCommandCenterPage } from './pages/AttendanceCommandCenterPage'
 import { AdminSettingsPage } from './pages/AdminSettingsPage'
 import { SessionDetailPage } from './pages/SessionDetailPage'
 import { StudentDashboardPage } from './pages/StudentDashboardPage'
@@ -12,8 +18,14 @@ import { StudentSessionPage } from './pages/StudentSessionPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { useAuthStore } from './store/auth'
-import { getTutorRoomContext } from './services/api'
+import { getBuildingsOverview, getTutorRoomContext } from './services/api'
 import { getCurrentPermissions, getCurrentUser, logout } from './services/auth'
+import { isUuidLikeBuildingId, normalizeBuildingCode, resolveBuildingFromRouteParam } from './utils/buildingRoute'
+
+const ENABLE_ADMIN_REDESIGN = (
+  (import.meta as ImportMeta & { env?: { VITE_ENABLE_ADMIN_REDESIGN?: string } }).env
+    ?.VITE_ENABLE_ADMIN_REDESIGN ?? 'true'
+) !== 'false'
 
 function AuthenticatedLayout(): JSX.Element {
   const navigate = useNavigate()
@@ -92,6 +104,15 @@ function AuthenticatedLayout(): JSX.Element {
             ) : null}
             <p className="auth-user">Signed in as {user?.username ?? 'Unknown'}</p>
           </div>
+          <button
+            type="button"
+            className="auth-brand"
+            onClick={() => navigate('/')}
+            aria-label="Return to command center"
+          >
+            <Activity size={16} />
+            <span>Smart Classroom Command Center</span>
+          </button>
           <div className="auth-topbar-right">
             {isSystemAdmin ? (
               <button
@@ -165,6 +186,72 @@ function ScopedClassroomHomeRoute(): JSX.Element {
   return <BuildingsOverviewPage />
 }
 
+function BuildingRouteEntry(): JSX.Element {
+  const { buildingId } = useParams<{ buildingId: string }>()
+  const location = useLocation()
+  const role = useAuthStore((state) => state.user?.role)
+  const isLegacyRequested = new URLSearchParams(location.search).get('legacy') === '1'
+
+  if (ENABLE_ADMIN_REDESIGN && role === 'SYSTEM_ADMIN' && buildingId && !isLegacyRequested) {
+    return <Navigate to={`/buildings/${buildingId}/sessions`} replace />
+  }
+
+  return <BuildingDashboardPage />
+}
+
+function CanonicalBuildingPath({ children }: { children: JSX.Element }): JSX.Element {
+  const { buildingId } = useParams<{ buildingId: string }>()
+  const location = useLocation()
+  const [canonicalPath, setCanonicalPath] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function resolveCanonicalPath(): Promise<void> {
+      if (!buildingId || !isUuidLikeBuildingId(buildingId)) {
+        if (isMounted) {
+          setCanonicalPath(null)
+        }
+        return
+      }
+
+      try {
+        const buildings = await getBuildingsOverview()
+        if (!isMounted) {
+          return
+        }
+
+        const resolvedBuilding = resolveBuildingFromRouteParam(buildings, buildingId)
+        const buildingCode = normalizeBuildingCode(resolvedBuilding?.code)
+        if (!buildingCode) {
+          setCanonicalPath(null)
+          return
+        }
+
+        const nextPathname = location.pathname.replace(`/buildings/${buildingId}`, `/buildings/${buildingCode}`)
+        const nextFullPath = `${nextPathname}${location.search}`
+        setCanonicalPath(nextFullPath === `${location.pathname}${location.search}` ? null : nextFullPath)
+      } catch {
+        if (isMounted) {
+          setCanonicalPath(null)
+        }
+      }
+    }
+
+    void resolveCanonicalPath()
+
+    return () => {
+      isMounted = false
+    }
+  }, [buildingId, location.pathname, location.search])
+
+  if (canonicalPath) {
+    return <Navigate to={canonicalPath} replace />
+  }
+
+  return children
+}
+
 function App() {
   return (
     <Router>
@@ -175,7 +262,38 @@ function App() {
           <Route element={<AuthenticatedLayout />}>
             <Route path="/" element={<HomeRoute />} />
             <Route path="/building-groups/:groupKey" element={<BuildingGroupPage />} />
-            <Route path="/buildings/:buildingId" element={<BuildingDashboardPage />} />
+            <Route path="/sessions" element={<BuildingSessionsPage />} />
+            <Route path="/devices" element={<DevicesGroupsOverviewPage />} />
+            <Route path="/devices/groups/:groupKey" element={<DevicesGroupPage />} />
+            <Route path="/attendance" element={<AttendanceCommandCenterPage />} />
+            <Route
+              path="/buildings/:buildingId"
+              element={(
+                <CanonicalBuildingPath>
+                  <BuildingRouteEntry />
+                </CanonicalBuildingPath>
+              )}
+            />
+            <Route
+              path="/buildings/:buildingId/sessions"
+              element={(
+                <CanonicalBuildingPath>
+                  <BuildingSessionsPage />
+                </CanonicalBuildingPath>
+              )}
+            />
+            <Route
+              path="/buildings/:buildingId/devices"
+              element={(
+                <CanonicalBuildingPath>
+                  <BuildingDevicesPage />
+                </CanonicalBuildingPath>
+              )}
+            />
+            <Route
+              path="/buildings/:buildingId/attendance"
+              element={<Navigate to="/attendance" replace />}
+            />
             <Route path="/admin/settings" element={<AdminSettingsPage />} />
             <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
             <Route path="/students/me/dashboard" element={<StudentDashboardPage />} />

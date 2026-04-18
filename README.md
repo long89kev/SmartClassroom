@@ -231,7 +231,34 @@ YOLO_CONFIDENCE_THRESHOLD=0.5
 
 # MQTT (Mock)
 MQTT_USE_MOCK=True
+
+# Attendance stream bridge
+# Local backend default: http://localhost:5051
+# Docker backend default (compose): http://host.docker.internal:5051
+ATTENDANCE_SERVICE_URL=http://localhost:5051
+
+# Optional frontend override (defaults to /api/attendance/stream)
+VITE_ATTENDANCE_STREAM_BASE_URL=/api/attendance/stream
 ```
+
+## Live Attendance Camera Feed
+
+The frontend now resolves camera stream URLs from environment config instead of hardcoded localhost values.
+
+1. Start backend and frontend as usual.
+2. Run attendance stream service from `embedded/attendance`:
+```bash
+python attendance_service.py
+```
+3. Verify stream endpoints:
+- `http://localhost:5051/health`
+- `http://localhost:5051/status`
+- `http://localhost:5051/video_feed`
+4. Frontend camera panels consume backend proxy endpoints under:
+- `/api/attendance/stream/status`
+- `/api/attendance/stream/video_feed`
+
+For Docker Compose, backend uses `ATTENDANCE_SERVICE_URL` to reach the attendance service (default target: `http://host.docker.internal:5051`).
 
 ## Development Notes
 

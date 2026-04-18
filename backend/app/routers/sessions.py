@@ -121,6 +121,18 @@ def _resolve_teacher_for_user(current_user: User, db: Session) -> Optional[Teach
         return db.query(Teacher).filter(Teacher.email == current_user.email).first()
     return None
 
+
+def _get_latest_active_session_for_room(room_id: UUID, db: Session) -> Optional[ClassSession]:
+    return (
+        db.query(ClassSession)
+        .filter(
+            ClassSession.room_id == room_id,
+            ClassSession.status == "ACTIVE",
+        )
+        .order_by(ClassSession.start_time.desc())
+        .first()
+    )
+
 # =============================================================================
 # SESSION MANAGEMENT
 # =============================================================================
@@ -148,6 +160,16 @@ async def create_session(
     subject = db.query(Subject).filter(Subject.id == session.subject_id).first()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
+
+    existing_active_session = _get_latest_active_session_for_room(session.room_id, db)
+    if existing_active_session:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Room already has an active session ({existing_active_session.id}). "
+                "End the active session before creating a new one."
+            ),
+        )
     
     # Create session
     students_present = [str(student_id) for student_id in (session.students_present or [])]
@@ -212,7 +234,9 @@ async def list_sessions(
             "room_id": session.room_id,
             "room_code": session.room.room_code if session.room else None,
             "teacher_id": session.teacher_id,
+            "teacher_name": session.teacher.name if session.teacher else None,
             "subject_id": session.subject_id,
+            "subject_name": session.subject.name if session.subject else None,
             "mode": session.mode,
             "status": session.status,
             "start_time": session.start_time,
@@ -402,6 +426,10 @@ async def get_current_session_target(
                 )
                 if slot_session:
                     return _serialize_session_target(slot_session, "timetable")
+
+                existing_room_active = _get_latest_active_session_for_room(slot.room_id, db)
+                if existing_room_active:
+                    return _serialize_session_target(existing_room_active, "timetable")
 
                 # Auto-create a session when timetable slot is active but no runtime session exists.
                 new_session = ClassSession(

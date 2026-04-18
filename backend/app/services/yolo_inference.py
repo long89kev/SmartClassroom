@@ -62,13 +62,6 @@ class YOLOInferenceService:
         "DISCUSS",
         "USING_PHONE",
         "USING_COMPUTER",
-        "GUIDE",
-        "ANSWER",
-        "ON_STAGE_INTERACTION",
-        "BLACKBOARD_WRITING",
-        "TEACHER",
-        "STAND",
-        "BLACKBOARD",
     }
 
     LABEL_ALIASES = {

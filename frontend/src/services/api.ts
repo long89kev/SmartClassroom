@@ -9,6 +9,14 @@ import type {
   TutorRoomContext,
   AttendanceConfigPayload,
   AttendanceDailyRoomSummary,
+  AttendanceDashboardBreakdownResponse,
+  AttendanceDashboardDimension,
+  AttendanceDashboardFilters,
+  AttendanceDashboardKpis,
+  AttendanceDashboardRankingScope,
+  AttendanceDashboardRankingsResponse,
+  AttendanceDashboardTrendGranularity,
+  AttendanceDashboardTrendResponse,
   AttendanceHistoryEntry,
   AttendanceMockEventPayload,
   AttendanceSessionReport,
@@ -342,6 +350,52 @@ export async function getStudentAttendanceHistory(studentId: string, limit = 30)
 export async function getRoomDailyAttendanceSummary(roomId: string, day?: string): Promise<AttendanceDailyRoomSummary> {
   const params = day ? { day } : undefined
   const { data } = await api.get<AttendanceDailyRoomSummary>(`/attendance/rooms/${roomId}/daily-summary`, { params })
+  return data
+}
+
+export async function getAttendanceDashboardKpis(filters: AttendanceDashboardFilters): Promise<AttendanceDashboardKpis> {
+  const { data } = await api.get<AttendanceDashboardKpis>('/attendance/dashboard/kpis', { params: filters })
+  return data
+}
+
+export async function getAttendanceDashboardBreakdown(
+  filters: AttendanceDashboardFilters,
+  dimension: AttendanceDashboardDimension,
+): Promise<AttendanceDashboardBreakdownResponse> {
+  const { data } = await api.get<AttendanceDashboardBreakdownResponse>('/attendance/dashboard/breakdown', {
+    params: { ...filters, dimension },
+  })
+  return data
+}
+
+export async function getAttendanceDashboardTrend(
+  filters: AttendanceDashboardFilters,
+  granularity: AttendanceDashboardTrendGranularity,
+): Promise<AttendanceDashboardTrendResponse> {
+  const { data } = await api.get<AttendanceDashboardTrendResponse>('/attendance/dashboard/trend', {
+    params: { ...filters, granularity },
+  })
+  return data
+}
+
+export async function getAttendanceDashboardRankings(
+  filters: AttendanceDashboardFilters,
+  scope: AttendanceDashboardRankingScope,
+): Promise<AttendanceDashboardRankingsResponse> {
+  const { data } = await api.get<AttendanceDashboardRankingsResponse>('/attendance/dashboard/rankings', {
+    params: { ...filters, scope },
+  })
+  return data
+}
+
+export async function exportAttendanceDashboard(
+  filters: AttendanceDashboardFilters,
+  format: 'xlsx' | 'csv' = 'xlsx',
+): Promise<Blob> {
+  const { data } = await api.get<Blob>('/attendance/dashboard/export', {
+    params: { ...filters, format },
+    responseType: 'blob',
+  })
   return data
 }
 

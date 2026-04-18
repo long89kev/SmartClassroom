@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useAuthStore } from '../store/auth'
 import { Building2, DoorOpen, Radio, Search } from 'lucide-react'
 import { getBuildingsOverview } from '../services/api'
 import type { BuildingOverview } from '../types'
@@ -43,10 +42,8 @@ function isGroupKey(value: string): value is BuildingGroupKey {
   return value === 'A' || value === 'B' || value === 'C' || value === 'LABS'
 }
 
-export function BuildingGroupPage(): JSX.Element {
+export function DevicesGroupPage(): JSX.Element {
   const { groupKey } = useParams<{ groupKey: string }>()
-  const currentRole = useAuthStore((state) => state.user?.role)
-  const isSystemAdmin = currentRole === 'SYSTEM_ADMIN'
 
   const [buildings, setBuildings] = useState<BuildingOverview[]>([])
   const [query, setQuery] = useState('')
@@ -65,13 +62,17 @@ export function BuildingGroupPage(): JSX.Element {
       setError(null)
       try {
         const data = await getBuildingsOverview()
-        if (isMounted) setBuildings(data)
+        if (isMounted) {
+          setBuildings(data)
+        }
       } catch (loadError) {
         if (isMounted) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load buildings')
         }
       } finally {
-        if (isMounted) setIsLoading(false)
+        if (isMounted) {
+          setIsLoading(false)
+        }
       }
     }
 
@@ -83,7 +84,9 @@ export function BuildingGroupPage(): JSX.Element {
   }, [])
 
   const groupBuildings = useMemo(() => {
-    if (!validGroupKey) return []
+    if (!validGroupKey) {
+      return []
+    }
 
     const normalizedQuery = query.trim().toLowerCase()
 
@@ -100,17 +103,17 @@ export function BuildingGroupPage(): JSX.Element {
   }, [buildings, query, validGroupKey])
 
   const totalRooms = useMemo(() => groupBuildings.reduce((sum, building) => sum + building.total_rooms, 0), [groupBuildings])
-  const totalActiveSessions = useMemo(
-    () => groupBuildings.reduce((sum, building) => sum + building.active_sessions_count, 0),
+  const totalOnlineRooms = useMemo(
+    () => groupBuildings.reduce((sum, building) => sum + building.rooms_online_count, 0),
     [groupBuildings],
   )
 
   if (!meta) {
     return (
       <main className="page campus-bg">
-        <section className="panel error-panel">Unknown building group. Please return to the group overview.</section>
-        <Link to="/" className="inline-link">
-          Back to Group Overview
+        <section className="panel error-panel">Unknown building group. Please return to devices groups.</section>
+        <Link to="/devices" className="inline-link">
+          Back to Devices Groups
         </Link>
       </main>
     )
@@ -121,16 +124,16 @@ export function BuildingGroupPage(): JSX.Element {
       <aside className="left-sidebar panel command-side-panel">
         <div className="sidebar-header">
           <p className="eyebrow">Navigation</p>
-          <h1>Building Group View</h1>
-          <p className="muted">{meta.title} workspace</p>
+          <h1>Device Group View</h1>
+          <p className="muted">{meta.title} device operations workspace</p>
         </div>
 
-        <AdminSidebarNav active="sessions" />
+        <AdminSidebarNav active="devices" />
       </aside>
 
       <section className="right-content group-view-content">
         <header className="hero-header command-hero group-view-hero">
-          <p className="eyebrow">Campus Group View</p>
+          <p className="eyebrow">Device Group View</p>
           <h1>{meta.title}</h1>
           <p className="subcopy">{meta.description}</p>
 
@@ -152,20 +155,20 @@ export function BuildingGroupPage(): JSX.Element {
             <article className="stat-card command-metric-card">
               <Radio size={18} />
               <div>
-                <strong>{totalActiveSessions}</strong>
-                <span>Active Sessions</span>
+                <strong>{totalOnlineRooms}</strong>
+                <span>Rooms Online</span>
               </div>
             </article>
           </div>
         </header>
 
         <section className="panel search-panel building-search-control command-search-panel">
-          <label htmlFor="group-building-search" className="search-label">
+          <label htmlFor="device-group-building-search" className="search-label">
             <Search size={16} />
-            Search groups by building name, code, or location
+            Search buildings by name, code, or location
           </label>
           <input
-            id="group-building-search"
+            id="device-group-building-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Type A1, B10, C4, LAB, location, or center name"
@@ -192,12 +195,10 @@ export function BuildingGroupPage(): JSX.Element {
 
         <section className="building-grid command-grid group-building-grid">
           {groupBuildings.map((building) => {
-            const sessionTone = metricTone(building.active_sessions_count)
-            const isLive = building.active_sessions_count > 0
+            const roomsOnlineTone = metricTone(building.rooms_online_count)
+            const isLive = building.rooms_online_count > 0
             const routeBuildingParam = toBuildingRouteParam(building)
-            const buildingTargetPath = isSystemAdmin
-              ? `/buildings/${routeBuildingParam}/sessions`
-              : `/buildings/${routeBuildingParam}`
+            const buildingTargetPath = `/buildings/${routeBuildingParam}/devices`
 
             return (
               <Link key={building.id} to={buildingTargetPath} className="building-card command-building-card">
@@ -212,15 +213,15 @@ export function BuildingGroupPage(): JSX.Element {
                 </div>
 
                 <div className="building-kpis">
-                  <div className={`kpi-chip tone-${sessionTone}`}>
+                  <div className="kpi-chip tone-neutral">
                     <span className="kpi-label">Active Sessions</span>
                     <strong>{building.active_sessions_count}</strong>
                   </div>
-                  <div className="kpi-chip tone-safe">
+                  <div className={`kpi-chip tone-${roomsOnlineTone}`}>
                     <span className="kpi-label">Rooms Online</span>
                     <strong>{building.rooms_online_count}</strong>
                   </div>
-                  <div className="kpi-chip tone-neutral">
+                  <div className="kpi-chip tone-safe">
                     <span className="kpi-label">Total Rooms</span>
                     <strong>{building.total_rooms}</strong>
                   </div>

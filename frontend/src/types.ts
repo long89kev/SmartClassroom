@@ -337,6 +337,66 @@ export interface AttendanceDailyRoomSummary {
   }
 }
 
+export type AttendanceDashboardDimension = 'session' | 'day_of_week' | 'subject'
+export type AttendanceDashboardTrendGranularity = 'day' | 'week' | 'month' | 'weekday'
+export type AttendanceDashboardRankingScope = 'session' | 'room' | 'subject'
+
+export interface AttendanceDashboardKpis {
+  enrolled: number
+  present: number
+  late: number
+  absent: number
+  attendance_rate: number
+}
+
+export interface AttendanceDashboardPoint {
+  key: string
+  label: string
+  enrolled: number
+  present: number
+  late: number
+  absent: number
+  attendance_rate: number
+}
+
+export interface AttendanceDashboardBreakdownResponse {
+  dimension: AttendanceDashboardDimension
+  points: AttendanceDashboardPoint[]
+}
+
+export interface AttendanceDashboardTrendResponse {
+  granularity: AttendanceDashboardTrendGranularity
+  points: AttendanceDashboardPoint[]
+}
+
+export interface AttendanceDashboardRankingRow {
+  rank: number
+  scope_key: string
+  scope_label: string
+  start_time: string | null
+  session_status: string | null
+  enrolled: number
+  present: number
+  late: number
+  absent: number
+  attendance_rate: number
+}
+
+export interface AttendanceDashboardRankingsResponse {
+  scope: AttendanceDashboardRankingScope
+  rows: AttendanceDashboardRankingRow[]
+}
+
+export interface AttendanceDashboardFilters {
+  start_date?: string
+  end_date?: string
+  building_id?: string
+  room_id?: string
+  subject_id?: string
+  session_id?: string
+  day_of_week?: number
+}
+
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'
 
 export interface StudentSessionCalendarItem {

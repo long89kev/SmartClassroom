@@ -19,6 +19,31 @@ ON CONFLICT (scope_type, scope_id, mode) DO UPDATE SET
     interval_ms = EXCLUDED.interval_ms,
     updated_at = NOW();
 
+-- Ensure board-level attendance thresholds exist for analytics dashboard.
+INSERT INTO attendance_board_thresholds (
+    id,
+    scope_type,
+    scope_id,
+    min_attendance_rate,
+    max_late_rate,
+    max_absent_rate,
+    note,
+    updated_by,
+    created_at,
+    updated_at
+)
+VALUES
+    (uuid_generate_v4(), 'SCHOOL', 'GLOBAL', 85.00, 10.00, 15.00, 'Runtime default school-wide threshold', NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'BUILDING', 'A', 86.00, 9.00, 14.00, 'Runtime building A baseline', NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'BUILDING', 'B', 84.00, 11.00, 16.00, 'Runtime building B baseline', NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'BUILDING', 'C', 84.00, 11.00, 16.00, 'Runtime building C baseline', NULL, NOW(), NOW())
+ON CONFLICT (scope_type, scope_id) DO UPDATE SET
+    min_attendance_rate = EXCLUDED.min_attendance_rate,
+    max_late_rate = EXCLUDED.max_late_rate,
+    max_absent_rate = EXCLUDED.max_absent_rate,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
 -- Schema guard for existing databases that predate teachers.user_id mapping.
 ALTER TABLE teachers
 ADD COLUMN IF NOT EXISTS user_id UUID;

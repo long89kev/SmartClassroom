@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # App
     debug: bool = True
     app_name: str = "Smart AI-IoT Classroom System"
+
+    # Attendance stream bridge
+    attendance_service_url: str = "http://localhost:5051"
     
     class Config:
         env_file = ".env"

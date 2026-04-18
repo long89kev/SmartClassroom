@@ -3,11 +3,12 @@ import { Camera, CheckCircle2, Clock, RefreshCw, UserX, Video, VideoOff, Wifi, W
 import type { AttendanceSessionReport } from '../types'
 import { getSessionAttendanceReport } from '../services/api'
 import { toLocalDateTime } from '../utils/time'
+import { buildAttendanceStreamUrl } from '../utils/attendanceStream'
 import './AttendanceLivePanel.css'
 
 interface AttendanceLivePanelProps {
   sessionId: string
-  streamUrl?: string  // defaults to http://localhost:5050
+  streamUrl?: string
 }
 
 interface ServiceStatus {
@@ -24,10 +25,9 @@ interface ServiceStatus {
   last_recognition_at: string | null
 }
 
-const DEFAULT_STREAM_URL = 'http://localhost:5051'
-
 export function AttendanceLivePanel({ sessionId, streamUrl }: AttendanceLivePanelProps): JSX.Element {
-  const baseUrl = streamUrl ?? DEFAULT_STREAM_URL
+  const statusUrl = buildAttendanceStreamUrl('/status', streamUrl)
+  const videoFeedUrl = buildAttendanceStreamUrl('/video_feed', streamUrl)
 
   const [report, setReport] = useState<AttendanceSessionReport | null>(null)
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null)
@@ -51,7 +51,7 @@ export function AttendanceLivePanel({ sessionId, streamUrl }: AttendanceLivePane
 
   const fetchServiceStatus = useCallback(async () => {
     try {
-      const resp = await fetch(`${baseUrl}/status`, { signal: AbortSignal.timeout(2000) })
+      const resp = await fetch(statusUrl, { signal: AbortSignal.timeout(2000) })
       if (resp.ok) {
         const data: ServiceStatus = await resp.json()
         setServiceStatus(data)
@@ -63,7 +63,7 @@ export function AttendanceLivePanel({ sessionId, streamUrl }: AttendanceLivePane
       setStreamReachable(false)
       setServiceStatus(null)
     }
-  }, [baseUrl])
+  }, [statusUrl])
 
   // Initial load
   useEffect(() => {
@@ -164,7 +164,7 @@ export function AttendanceLivePanel({ sessionId, streamUrl }: AttendanceLivePane
           <div className="alp-camera-feed" id="attendance-camera-feed">
             {streamReachable ? (
               <img
-                src={`${baseUrl}/video_feed`}
+                src={videoFeedUrl}
                 alt="Live webcam feed"
                 className="alp-camera-img"
               />

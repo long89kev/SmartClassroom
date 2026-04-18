@@ -92,6 +92,27 @@ def _generate_device_id(existing_ids: set[str]) -> str:
             return candidate
 
 
+def _read_room_device_list(room: Room) -> list[dict]:
+    """Return a safe copy of room device_list for mutation operations."""
+    if not isinstance(room.devices, dict):
+        return []
+
+    device_list = room.devices.get("device_list", [])
+    if not isinstance(device_list, list):
+        return []
+
+    return [dict(device) for device in device_list if isinstance(device, dict)]
+
+
+def _write_room_device_list(room: Room, device_list: list[dict]) -> None:
+    """Assign room.devices at top-level so SQLAlchemy persists JSON updates."""
+    current_payload = room.devices if isinstance(room.devices, dict) else {}
+    room.devices = {
+        **current_payload,
+        "device_list": [dict(device) for device in device_list if isinstance(device, dict)],
+    }
+
+
 def _validate_threshold_range(payload: ThresholdUpdatePayload) -> None:
     """Validate threshold range: min <= max and target within [min, max]"""
     if payload.min_value is not None and payload.max_value is not None:
@@ -128,8 +149,8 @@ async def list_room_devices(room_id: UUID, db: Session = Depends(get_db)):
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
-    
-    devices = room.devices.get("device_list", []) if room.devices else []
+
+    devices = _read_room_device_list(room)
     normalized_devices = []
 
     for device in devices:
@@ -181,15 +202,11 @@ async def add_device_to_room(
         
         validated_type = _validate_device_type_supported(db, device.device_type)
 
-        # Ensure devices JSONB exists
-        if not room.devices:
-            room.devices = {"device_list": []}
-        
         # Check if device already exists
-        device_list = room.devices.get("device_list", [])
+        device_list = _read_room_device_list(room)
         existing_ids = {d["device_id"] for d in device_list if "device_id" in d}
 
-        if device.device_id and any(d["device_id"] == device.device_id for d in device_list):
+        if device.device_id and any(d.get("device_id") == device.device_id for d in device_list):
             raise HTTPException(status_code=400, detail="Device already exists in room")
 
         device_id = device.device_id or _generate_device_id(existing_ids)
@@ -210,16 +227,17 @@ async def add_device_to_room(
             "mqtt_topic": f"building/*/floor/*/room/{room.room_code}/device/{device_id}/state",
             "power_consumption_watts": device.power_consumption_watts or 0
         }
-        
+
         device_list.append(new_device)
-        room.devices["device_list"] = device_list
+        _write_room_device_list(room, device_list)
         
         # Also create entry in device_states table for tracking
         device_state = DeviceState(
             room_id=room_id,
             device_id=device_id,
             device_type=validated_type.code,
-            status="OFF"
+            status="OFF",
+            last_updated=datetime.utcnow(),
         )
         room_device = RoomDevice(
             room_id=room_id,
@@ -235,11 +253,11 @@ async def add_device_to_room(
         db.add(device_state)
         db.commit()
         db.refresh(room)
-        
+
         return {
             "message": "Device added successfully",
             "device": new_device,
-            "total_devices": len(room.devices["device_list"])
+            "total_devices": len(device_list)
         }
     except HTTPException:
         db.rollback()
@@ -264,12 +282,13 @@ async def update_device_metadata(
         room = db.query(Room).filter(Room.id == room_id).first()
         if not room:
             raise HTTPException(status_code=404, detail="Room not found")
-        
-        device_list = room.devices.get("device_list", [])
-        device = next((d for d in device_list if d["device_id"] == device_id), None)
-        
-        if not device:
+
+        device_list = _read_room_device_list(room)
+        device_index = next((index for index, item in enumerate(device_list) if item.get("device_id") == device_id), -1)
+        if device_index < 0:
             raise HTTPException(status_code=404, detail="Device not found in room")
+
+        device = dict(device_list[device_index])
         
         # Update allowed fields with validation
         if "location_front_back" in updates:
@@ -303,6 +322,9 @@ async def update_device_metadata(
         if "power_consumption_watts" in updates:
             device["power_consumption_watts"] = int(updates["power_consumption_watts"])
 
+        device_list[device_index] = device
+        _write_room_device_list(room, device_list)
+
         room_device = db.query(RoomDevice).filter(
             RoomDevice.room_id == room_id,
             RoomDevice.device_id == device_id,
@@ -312,6 +334,15 @@ async def update_device_metadata(
             room_device.location_left_right = device["location_left_right"]
             room_device.power_consumption_watts = int(device.get("power_consumption_watts", 0) or 0)
             room_device.updated_at = datetime.utcnow()
+
+        device_state = db.query(DeviceState).filter(
+            DeviceState.room_id == room_id,
+            DeviceState.device_id == device_id,
+        ).first()
+        if device_state:
+            now = datetime.utcnow()
+            device_state.last_updated = now
+            device_state.updated_at = now
         
         db.commit()
         db.refresh(room)
@@ -342,15 +373,16 @@ async def remove_device_from_room(
         room = db.query(Room).filter(Room.id == room_id).first()
         if not room:
             raise HTTPException(status_code=404, detail="Room not found")
-        
-        device_list = room.devices.get("device_list", [])
+
+        device_list = _read_room_device_list(room)
         initial_count = len(device_list)
-        
+
         # Filter out the device
-        room.devices["device_list"] = [d for d in device_list if d["device_id"] != device_id]
-        
-        if len(room.devices["device_list"]) == initial_count:
+        filtered_devices = [d for d in device_list if d.get("device_id") != device_id]
+        if len(filtered_devices) == initial_count:
             raise HTTPException(status_code=404, detail="Device not found")
+
+        _write_room_device_list(room, filtered_devices)
         
         # Remove from device_states table too
         device_state = db.query(DeviceState).filter(
