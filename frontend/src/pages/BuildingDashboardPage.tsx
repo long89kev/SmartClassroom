@@ -152,10 +152,10 @@ export function BuildingDashboardPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const { has, hasAny } = usePermissions()
   const currentRole = useAuthStore((state) => state.user?.role ?? null)
-  const isTutorDashboard = currentRole === 'LECTURER'
-  const isProctorDashboard = currentRole === 'EXAM_PROCTOR'
+  const isTutorDashboard = currentRole === 'INSTRUCTOR'
+  const isProctorDashboard = currentRole === 'INSTRUCTOR'
   const isFacilityDashboard = currentRole === 'FACILITY_STAFF'
-  const isCleaningStaffDashboard = currentRole === 'CLEANING_STAFF'
+  const isCleaningStaffDashboard = currentRole === 'FACILITY_STAFF'
   const isOperationsDashboard = isFacilityDashboard || isCleaningStaffDashboard
   const isScopedClassroomDashboard = isTutorDashboard || isProctorDashboard
 
@@ -164,9 +164,9 @@ export function BuildingDashboardPage(): JSX.Element {
   const canToggleDevices =
     canManageDevices ||
     hasAny([PERMISSIONS.ENV_LIGHT, PERMISSIONS.ENV_AC, PERMISSIONS.ENV_FAN]) ||
-    currentRole === 'CLEANING_STAFF'
+    currentRole === 'FACILITY_STAFF'
   const canManageThresholds = hasAny([PERMISSIONS.ENV_THRESHOLDS, PERMISSIONS.SYSTEM_SETTINGS])
-  const canManageAttendanceConfig = currentRole === 'LECTURER' || currentRole === 'SYSTEM_ADMIN'
+  const canManageAttendanceConfig = currentRole === 'INSTRUCTOR' || currentRole === 'ACADEMIC_MANAGER'
   const canSwitchLearningMode = has(PERMISSIONS.MODE_SWITCH_LEARNING)
   const canSwitchTestingMode = has(PERMISSIONS.MODE_SWITCH_TESTING)
   const canEndSession = canSwitchLearningMode || canSwitchTestingMode
@@ -183,7 +183,7 @@ export function BuildingDashboardPage(): JSX.Element {
     PERMISSIONS.INCIDENT_AUDIT,
     PERMISSIONS.ALERT_ACKNOWLEDGE,
   ])
-  const isSystemAdmin = currentRole === 'SYSTEM_ADMIN'
+  const isSystemAdmin = currentRole === 'ACADEMIC_MANAGER'
   const shouldShowWorkspace = !isSystemAdmin || Boolean(selectedSessionId)
 
   useEffect(() => {
@@ -1305,20 +1305,24 @@ export function BuildingDashboardPage(): JSX.Element {
 
         {!isCleaningStaffDashboard ? (
           <section className="panel kpi-row">
-            <article className="kpi-tile danger">
-              <AlertTriangle size={18} />
-              <div>
-                <p>Unreviewed Alerts</p>
-                <strong>{unreviewedCount}</strong>
-              </div>
-            </article>
-            <article className="kpi-tile warn">
-              <School size={18} />
-              <div>
-                <p>Active Sessions</p>
-                <strong>{visibleSessions.length}</strong>
-              </div>
-            </article>
+            {!isOperationsDashboard && (
+              <article className="kpi-tile danger">
+                <AlertTriangle size={18} />
+                <div>
+                  <p>Unreviewed Alerts</p>
+                  <strong>{unreviewedCount}</strong>
+                </div>
+              </article>
+            )}
+            {!isOperationsDashboard && (
+              <article className="kpi-tile warn">
+                <School size={18} />
+                <div>
+                  <p>Active Sessions</p>
+                  <strong>{visibleSessions.length}</strong>
+                </div>
+              </article>
+            )}
             <article className="kpi-tile safe">
               <Monitor size={18} />
               <div>

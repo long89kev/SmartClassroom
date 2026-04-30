@@ -29,11 +29,11 @@ CREATE TABLE IF NOT EXISTS users (
   username VARCHAR(255) NOT NULL UNIQUE,
   email VARCHAR(255) UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL DEFAULT 'LECTURER',
+  role VARCHAR(50) NOT NULL DEFAULT 'INSTRUCTOR',
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
+  CHECK (role IN ('INSTRUCTOR', 'ACADEMIC_MANAGER', 'FACILITY_STAFF', 'STUDENT'))
 );
 
 -- Floors
@@ -503,10 +503,10 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
   created_at TIMESTAMP DEFAULT NOW(),
   UNIQUE(role, permission_id),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
+  CHECK (role IN ('INSTRUCTOR', 'ACADEMIC_MANAGER', 'FACILITY_STAFF', 'STUDENT'))
 );
 
--- User-to-Room Assignments (Scope: Lecturers assigned to specific rooms/sessions)
+-- User-to-Room Assignments (Scope: Instructors assigned to specific rooms/sessions)
 CREATE TABLE IF NOT EXISTS user_room_assignments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -532,7 +532,7 @@ CREATE TABLE IF NOT EXISTS user_block_assignments (
   UNIQUE(user_id, floor_id)
 );
 
--- Role-to-Mode Access Matrix (Optional: EXAM_PROCTOR mode switching controls)
+-- Role-to-Mode Access Matrix (controls mode switching per role)
 CREATE TABLE IF NOT EXISTS role_mode_access (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   role VARCHAR(50) NOT NULL UNIQUE,
@@ -541,7 +541,7 @@ CREATE TABLE IF NOT EXISTS role_mode_access (
   can_view_reports BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  CHECK (role IN ('LECTURER', 'EXAM_PROCTOR', 'ACADEMIC_BOARD', 'SYSTEM_ADMIN', 'FACILITY_STAFF', 'CLEANING_STAFF', 'STUDENT'))
+  CHECK (role IN ('INSTRUCTOR', 'ACADEMIC_MANAGER', 'FACILITY_STAFF', 'STUDENT'))
 );
 
 -- ============================================================================
@@ -743,9 +743,9 @@ INSERT INTO permissions (key, display_name, description, category, is_active) VA
 ('deploy:system_settings', 'System Configuration', 'Update system-wide settings', 'deployment', TRUE)
 ON CONFLICT (key) DO NOTHING;
 
--- LECTURER role permissions (REQ-01, REQ-02, REQ-05)
+-- INSTRUCTOR role permissions (merged LECTURER + EXAM_PROCTOR)
 INSERT INTO role_permissions (role, permission_id)
-SELECT 'LECTURER', id FROM permissions WHERE key IN (
+SELECT 'INSTRUCTOR', id FROM permissions WHERE key IN (
   'camera:view_live',
   'camera:view_recorded',
   'dashboard:view_classroom',
@@ -753,45 +753,20 @@ SELECT 'LECTURER', id FROM permissions WHERE key IN (
   'mode:switch_testing',
   'incident:view',
   'ai_alerts:view',
+  'ai_alerts:acknowledge',
   'env_control:light',
   'env_control:ac',
   'env_control:fan'
 ) ON CONFLICT DO NOTHING;
 
--- EXAM_PROCTOR role permissions (REQ-03, REQ-04)
+-- ACADEMIC_MANAGER role permissions (merged SYSTEM_ADMIN + ACADEMIC_BOARD)
 INSERT INTO role_permissions (role, permission_id)
-SELECT 'EXAM_PROCTOR', id FROM permissions WHERE key IN (
-  'camera:view_live',
-  'camera:view_recorded',
-  'mode:switch_testing',
-  'dashboard:view_classroom',
-  'ai_alerts:view',
-  'ai_alerts:acknowledge',
-  'incident:view',
-  'env_control:light'
-) ON CONFLICT DO NOTHING;
-
--- ACADEMIC_BOARD role permissions (REQ-06, REQ-07, REQ-08, REQ-11)
-INSERT INTO role_permissions (role, permission_id)
-SELECT 'ACADEMIC_BOARD', id FROM permissions WHERE key IN (
-  'camera:view_live',
-  'camera:view_recorded',
-  'dashboard:view_block',
-  'dashboard:view_university',
-  'ai_alerts:view',
-  'incident:view',
-  'incident:audit',
-  'report:performance',
-  'report:attendance',
-  'report:incidents'
-) ON CONFLICT DO NOTHING;
-
--- SYSTEM_ADMIN role permissions (REQ-09, REQ-10)
-INSERT INTO role_permissions (role, permission_id)
-SELECT 'SYSTEM_ADMIN', id FROM permissions WHERE key IN (
+SELECT 'ACADEMIC_MANAGER', id FROM permissions WHERE key IN (
   'camera:view_live',
   'camera:view_recorded',
   'camera:download',
+  'dashboard:view_classroom',
+  'dashboard:view_block',
   'dashboard:view_university',
   'ai_alerts:view',
   'ai_alerts:create_rules',
@@ -812,23 +787,16 @@ SELECT 'SYSTEM_ADMIN', id FROM permissions WHERE key IN (
   'deploy:system_settings'
 ) ON CONFLICT DO NOTHING;
 
--- FACILITY_STAFF role permissions
+-- FACILITY_STAFF role permissions (merged FACILITY_STAFF + CLEANING_STAFF)
 INSERT INTO role_permissions (role, permission_id)
 SELECT 'FACILITY_STAFF', id FROM permissions WHERE key IN (
-  'dashboard:view_block',
   'env_control:light',
   'env_control:ac',
   'env_control:fan',
   'env_control:thresholds',
   'deploy:device_management',
-  'report:attendance'
-) ON CONFLICT DO NOTHING;
-
--- CLEANING_STAFF role permissions
-INSERT INTO role_permissions (role, permission_id)
-SELECT 'CLEANING_STAFF', id FROM permissions WHERE key IN (
   'dashboard:view_minimal',
-  'env_control:light'
+  'dashboard:view_block'
 ) ON CONFLICT DO NOTHING;
 
 -- STUDENT role permissions (self-service dashboard only)
@@ -842,12 +810,9 @@ SELECT 'STUDENT', id FROM permissions WHERE key IN (
 
 -- Role-Mode Access Matrix
 INSERT INTO role_mode_access (role, can_switch_to_testing, can_switch_to_learning, can_view_reports) VALUES
-('LECTURER', TRUE, TRUE, TRUE),
-('EXAM_PROCTOR', TRUE, FALSE, FALSE),
-('ACADEMIC_BOARD', FALSE, FALSE, TRUE),
-('SYSTEM_ADMIN', TRUE, TRUE, TRUE),
+('INSTRUCTOR', TRUE, TRUE, TRUE),
+('ACADEMIC_MANAGER', TRUE, TRUE, TRUE),
 ('FACILITY_STAFF', FALSE, TRUE, FALSE),
-('CLEANING_STAFF', FALSE, FALSE, FALSE),
 ('STUDENT', FALSE, FALSE, TRUE)
 ON CONFLICT (role) DO UPDATE SET
   can_switch_to_testing = EXCLUDED.can_switch_to_testing,

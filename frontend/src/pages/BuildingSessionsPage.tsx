@@ -114,14 +114,14 @@ export function BuildingSessionsPage(): JSX.Element {
 
   const isGlobalMode = !buildingId
   const canAccessGlobalWorkspace =
-    currentRole === 'SYSTEM_ADMIN' || currentRole === 'FACILITY_STAFF' || currentRole === 'CLEANING_STAFF'
-  const canManageAttendanceConfig = currentRole === 'LECTURER' || currentRole === 'SYSTEM_ADMIN'
+    currentRole === 'ACADEMIC_MANAGER' || currentRole === 'FACILITY_STAFF' || currentRole === 'FACILITY_STAFF'
+  const canManageAttendanceConfig = currentRole === 'INSTRUCTOR' || currentRole === 'ACADEMIC_MANAGER'
   const canManageDevices = hasAny([PERMISSIONS.DEVICE_MANAGEMENT, PERMISSIONS.SYSTEM_SETTINGS])
   const canManageThresholds = hasAny([PERMISSIONS.ENV_THRESHOLDS, PERMISSIONS.SYSTEM_SETTINGS])
   const canToggleDevices =
     canManageDevices ||
     hasAny([PERMISSIONS.ENV_LIGHT, PERMISSIONS.ENV_AC, PERMISSIONS.ENV_FAN]) ||
-    currentRole === 'CLEANING_STAFF'
+    currentRole === 'FACILITY_STAFF'
   const canOnlyToggleDevices = canToggleDevices && !canManageDevices
 
   const [buildings, setBuildings] = useState<BuildingOverview[]>([])
@@ -1392,10 +1392,53 @@ export function BuildingSessionsPage(): JSX.Element {
           <section className="panel student-list-panel">
             <div className="section-title-row">
               <h3>Student List</h3>
-              <div className="row-actions">
-                <span>{selectedSession ? `Session ${selectedSession.id.slice(0, 8).toUpperCase()}` : 'No session selected'}</span>
+              <div className="row-actions row-actions--horizontal">
+                {attendanceReport && (
+                  <div className="student-kpi-bar student-kpi-bar--compact">
+                    <div className="student-kpi-tile">
+                      <span>Enrolled</span>
+                      <strong>{attendanceReport.totals.enrolled}</strong>
+                    </div>
+                    <div className="student-kpi-tile present">
+                      <span>Present</span>
+                      <strong>{attendanceReport.totals.present}</strong>
+                    </div>
+                    <div className="student-kpi-tile late">
+                      <span>Late</span>
+                      <strong>{attendanceReport.totals.late}</strong>
+                    </div>
+                    <div className="student-kpi-tile absent">
+                      <span>Absent</span>
+                      <strong>{attendanceReport.totals.absent}</strong>
+                    </div>
+                    {selectedSession?.mode === 'NORMAL' && (() => {
+                      const scores = attendanceReport.students
+                        .map(s => s.performance_score)
+                        .filter((s): s is number => s !== null)
+                      const avg = scores.length > 0
+                        ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+                        : null
+                      return avg !== null ? (
+                        <div className="student-kpi-tile perf">
+                          <span>Avg Score</span>
+                          <strong>{avg}</strong>
+                        </div>
+                      ) : null
+                    })()}
+                    {selectedSession?.mode === 'TESTING' && (() => {
+                      const flagged = attendanceReport.students.filter(s => s.risk_level !== null).length
+                      return (
+                        <div className="student-kpi-tile risk">
+                          <span>Flagged</span>
+                          <strong>{flagged}</strong>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
                 <button
                   type="button"
+                  className="header-nav-link btn-capture-styled"
                   onClick={() => {
                     if (selectedSession) {
                       navigate(`/sessions/${selectedSession.id}/capture`)
@@ -1407,50 +1450,6 @@ export function BuildingSessionsPage(): JSX.Element {
                 </button>
               </div>
             </div>
-
-            {attendanceReport && (
-              <div className="student-kpi-bar">
-                <div className="student-kpi-tile">
-                  <span>Enrolled</span>
-                  <strong>{attendanceReport.totals.enrolled}</strong>
-                </div>
-                <div className="student-kpi-tile present">
-                  <span>Present</span>
-                  <strong>{attendanceReport.totals.present}</strong>
-                </div>
-                <div className="student-kpi-tile late">
-                  <span>Late</span>
-                  <strong>{attendanceReport.totals.late}</strong>
-                </div>
-                <div className="student-kpi-tile absent">
-                  <span>Absent</span>
-                  <strong>{attendanceReport.totals.absent}</strong>
-                </div>
-                {selectedSession?.mode === 'NORMAL' && (() => {
-                  const scores = attendanceReport.students
-                    .map(s => s.performance_score)
-                    .filter((s): s is number => s !== null)
-                  const avg = scores.length > 0
-                    ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
-                    : null
-                  return avg !== null ? (
-                    <div className="student-kpi-tile perf">
-                      <span>Avg Score</span>
-                      <strong>{avg}</strong>
-                    </div>
-                  ) : null
-                })()}
-                {selectedSession?.mode === 'TESTING' && (() => {
-                  const flagged = attendanceReport.students.filter(s => s.risk_level !== null).length
-                  return (
-                    <div className="student-kpi-tile risk">
-                      <span>Flagged</span>
-                      <strong>{flagged}</strong>
-                    </div>
-                  )
-                })()}
-              </div>
-            )}
 
             {isAttendanceLoading ? (
               <p className="muted">Loading student attendance...</p>

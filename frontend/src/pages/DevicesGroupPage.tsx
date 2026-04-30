@@ -4,6 +4,7 @@ import { Building2, DoorOpen, Radio, Search } from 'lucide-react'
 import { getBuildingsOverview } from '../services/api'
 import type { BuildingOverview } from '../types'
 import { toBuildingRouteParam } from '../utils/buildingRoute'
+import { useAuthStore } from '../store/auth'
 
 type BuildingGroupKey = 'A' | 'B' | 'C' | 'LABS'
 
@@ -43,6 +44,7 @@ function isGroupKey(value: string): value is BuildingGroupKey {
 
 export function DevicesGroupPage(): JSX.Element {
   const { groupKey } = useParams<{ groupKey: string }>()
+  const user = useAuthStore((state) => state.user)
 
   const [buildings, setBuildings] = useState<BuildingOverview[]>([])
   const [query, setQuery] = useState('')
@@ -127,21 +129,21 @@ export function DevicesGroupPage(): JSX.Element {
           <p className="subcopy">{meta.description}</p>
 
           <div className="hero-metrics command-metrics">
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-safe">
               <Building2 size={18} />
               <div>
                 <strong>{groupBuildings.length}</strong>
                 <span>Buildings</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-warn">
               <DoorOpen size={18} />
               <div>
                 <strong>{totalRooms}</strong>
                 <span>Total Rooms</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-neutral">
               <Radio size={18} />
               <div>
                 <strong>{totalOnlineRooms}</strong>
@@ -202,10 +204,12 @@ export function DevicesGroupPage(): JSX.Element {
                 </div>
 
                 <div className="building-kpis">
-                  <div className="kpi-chip tone-neutral">
-                    <span className="kpi-label">Active Sessions</span>
-                    <strong>{building.active_sessions_count}</strong>
-                  </div>
+                  {user?.role !== 'FACILITY_STAFF' && (
+                    <div className="kpi-chip tone-neutral">
+                      <span className="kpi-label">Active Sessions</span>
+                      <strong>{building.active_sessions_count}</strong>
+                    </div>
+                  )}
                   <div className={`kpi-chip tone-${roomsOnlineTone}`}>
                     <span className="kpi-label">Rooms Online</span>
                     <strong>{building.rooms_online_count}</strong>

@@ -103,9 +103,6 @@ export function StudentSessionPage(): JSX.Element {
       <section className="panel student-session-header">
         <div className="section-title-row">
           <h1>Session Analytics</h1>
-          <Link to="/students/me/dashboard" className="inline-link">
-            <ArrowLeft size={14} /> Back to Weekly Dashboard
-          </Link>
         </div>
 
         {isLoading ? <p className="muted">Loading session analytics...</p> : null}

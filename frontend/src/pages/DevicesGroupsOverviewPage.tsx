@@ -125,21 +125,21 @@ export function DevicesGroupsOverviewPage(): JSX.Element {
           </p>
 
           <div className="hero-metrics command-metrics">
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-safe">
               <Building2 size={18} />
               <div>
                 <strong>{filteredBuildings.length}</strong>
                 <span>Total Buildings</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-warn">
               <DoorOpen size={18} />
               <div>
                 <strong>{totalRooms}</strong>
                 <span>Total Rooms</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-neutral">
               <Radio size={18} />
               <div>
                 <strong>{totalOnlineRooms}</strong>

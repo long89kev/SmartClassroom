@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Play, Square, AlertCircle, RefreshCw } from 'lucide-react'
+import { Play, Square, AlertCircle, RefreshCw } from 'lucide-react'
 import { CameraIngestPanel, type CameraIngestPanelHandle } from '../components/CameraIngestPanel'
 import { useCameraInterval } from '../hooks/useCameraInterval'
 import { useFrameUpload } from '../hooks/useFrameUpload'
@@ -161,9 +161,6 @@ export function SessionCameraCapturePage(): JSX.Element {
   return (
     <main className="page campus-bg">
       <section className="panel">
-        <button type="button" className="inline-link inline-link-button" onClick={() => navigate(-1)}>
-          <ChevronLeft size={16} /> Back
-        </button>
 
         <h1>Camera Capture & Inference</h1>
         <p className="muted">Session: {sessionId}</p>

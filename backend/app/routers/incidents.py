@@ -18,15 +18,15 @@ def _ensure_incident_role(current_user: User, allowed_roles: set[str]) -> None:
 
 
 def _ensure_incident_scope(current_user: User, room_id: UUID, db: Session) -> None:
-    if current_user.role == "SYSTEM_ADMIN":
+    if current_user.role == "ACADEMIC_MANAGER":
         return
 
-    if current_user.role in {"EXAM_PROCTOR", "LECTURER"}:
+    if current_user.role in {"INSTRUCTOR"}:
         assigned_rooms = set(get_user_room_scope(current_user, db))
         if room_id not in assigned_rooms:
             raise HTTPException(status_code=403, detail="User not assigned to this room")
 
-    if current_user.role == "ACADEMIC_BOARD":
+    if current_user.role == "ACADEMIC_MANAGER":
         room = db.query(Room).filter(Room.id == room_id).first()
         if not room:
             raise HTTPException(status_code=404, detail="Room not found")
@@ -71,7 +71,7 @@ async def list_all_incidents(
     db: Session = Depends(get_db)
 ):
     """List all risk incidents with optional filters"""
-    _ensure_incident_role(current_user, {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:view"})
 
     query = db.query(RiskIncident)
@@ -88,7 +88,7 @@ async def list_all_incidents(
     
     incidents = query.order_by(RiskIncident.flagged_at.desc()).all()
 
-    if current_user.role in {"LECTURER", "EXAM_PROCTOR"}:
+    if current_user.role in {"INSTRUCTOR"}:
         assigned_rooms = set(get_user_room_scope(current_user, db))
         incidents = [
             incident
@@ -96,7 +96,7 @@ async def list_all_incidents(
             if incident.session and incident.session.room_id in assigned_rooms
         ]
 
-    if current_user.role == "ACADEMIC_BOARD":
+    if current_user.role == "ACADEMIC_MANAGER":
         assigned_blocks = set(get_user_block_scope(current_user, db))
         incidents = [
             incident
@@ -113,7 +113,7 @@ async def list_room_incidents(
     db: Session = Depends(get_db)
 ):
     """List all risk incidents in a room"""
-    _ensure_incident_role(current_user, {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:view"})
     _ensure_incident_scope(current_user, room_id, db)
 
@@ -138,7 +138,7 @@ async def get_incident(
     db: Session = Depends(get_db)
 ):
     """Get specific incident details with snapshot"""
-    _ensure_incident_role(current_user, {"EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:view"})
 
     incident = db.query(RiskIncident).filter(RiskIncident.id == incident_id).first()
@@ -157,7 +157,7 @@ async def create_incident(
     db: Session = Depends(get_db)
 ):
     """Create/flag a new risk incident (called by grading service when risk detected)"""
-    _ensure_incident_role(current_user, {"EXAM_PROCTOR", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:view", "incident:resolve"})
 
     session = db.query(ClassSession).filter(ClassSession.id == incident.session_id).first()
@@ -207,7 +207,7 @@ async def review_incident(
     db: Session = Depends(get_db)
 ):
     """Mark incident as reviewed with optional notes"""
-    _ensure_incident_role(current_user, {"EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:audit", "incident:resolve", "ai_alerts:acknowledge"})
 
     incident = db.query(RiskIncident).filter(RiskIncident.id == incident_id).first()
@@ -240,7 +240,7 @@ async def get_unreviewed_incidents(
     db: Session = Depends(get_db)
 ):
     """Get list of unreviewed incidents in a room"""
-    _ensure_incident_role(current_user, {"EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"incident:view"})
     _ensure_incident_scope(current_user, room_id, db)
 
@@ -277,7 +277,7 @@ async def get_incident_snapshot(
     db: Session = Depends(get_db)
 ):
     """Download snapshot image from incident"""
-    _ensure_incident_role(current_user, {"EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN"})
+    _ensure_incident_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_incident_permissions(current_user, db, {"camera:view_recorded", "camera:view_live"})
 
     incident = db.query(RiskIncident).filter(RiskIncident.id == incident_id).first()

@@ -77,12 +77,12 @@ def test_hash_and_verify_password_roundtrip() -> None:
 
 def test_jwt_create_and_verify_token() -> None:
     user_id = uuid4()
-    token = create_access_token(user_id=user_id, role="SYSTEM_ADMIN", expire_delta=timedelta(minutes=2))
+    token = create_access_token(user_id=user_id, role="ACADEMIC_MANAGER", expire_delta=timedelta(minutes=2))
 
     payload = verify_token(token)
 
     assert payload["user_id"] == str(user_id)
-    assert payload["role"] == "SYSTEM_ADMIN"
+    assert payload["role"] == "ACADEMIC_MANAGER"
     assert payload["exp"] >= int(datetime.utcnow().timestamp())
 
 
@@ -95,8 +95,8 @@ def test_verify_token_rejects_invalid_token() -> None:
 
 
 def test_require_role_allows_matching_role() -> None:
-    checker = require_role("SYSTEM_ADMIN", "LECTURER")
-    current_user = SimpleNamespace(role="LECTURER")
+    checker = require_role("ACADEMIC_MANAGER", "INSTRUCTOR")
+    current_user = SimpleNamespace(role="INSTRUCTOR")
 
     result = asyncio.run(checker(current_user=current_user))
 
@@ -104,7 +104,7 @@ def test_require_role_allows_matching_role() -> None:
 
 
 def test_require_role_rejects_non_matching_role() -> None:
-    checker = require_role("SYSTEM_ADMIN")
+    checker = require_role("ACADEMIC_MANAGER")
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(checker(current_user=SimpleNamespace(role="STUDENT")))
@@ -113,8 +113,8 @@ def test_require_role_rejects_non_matching_role() -> None:
 
 
 def test_get_user_permissions_collects_role_permissions() -> None:
-    db = FakeDB(permissions_by_role={"LECTURER": ["dashboard:view_classroom", "session:view"]})
-    user = SimpleNamespace(role="LECTURER")
+    db = FakeDB(permissions_by_role={"INSTRUCTOR": ["dashboard:view_classroom", "session:view"]})
+    user = SimpleNamespace(role="INSTRUCTOR")
 
     permissions = get_user_permissions(user, db)
 
@@ -122,9 +122,9 @@ def test_get_user_permissions_collects_role_permissions() -> None:
 
 
 def test_require_permission_accepts_when_any_permission_matches() -> None:
-    db = FakeDB(permissions_by_role={"LECTURER": ["dashboard:view_classroom"]})
+    db = FakeDB(permissions_by_role={"INSTRUCTOR": ["dashboard:view_classroom"]})
     checker = require_permission("dashboard:view_classroom", "dashboard:view_block")
-    user = SimpleNamespace(role="LECTURER")
+    user = SimpleNamespace(role="INSTRUCTOR")
 
     result = asyncio.run(checker(current_user=user, db=db))
 
@@ -143,7 +143,7 @@ def test_require_permission_denies_when_missing_permissions() -> None:
 
 
 def test_check_mode_access_system_admin_always_allowed() -> None:
-    user = SimpleNamespace(role="SYSTEM_ADMIN")
+    user = SimpleNamespace(role="ACADEMIC_MANAGER")
 
     assert check_mode_access(user, "TESTING", db=FakeDB()) is True
     assert check_mode_access(user, "LEARNING", db=FakeDB()) is True
@@ -157,10 +157,10 @@ def test_check_mode_access_denies_when_role_has_no_mapping() -> None:
 
 def test_check_mode_access_uses_role_mapping_flags() -> None:
     mapping = {
-        "EXAM_PROCTOR": SimpleNamespace(can_switch_to_testing=True, can_switch_to_learning=False),
+        "INSTRUCTOR": SimpleNamespace(can_switch_to_testing=True, can_switch_to_learning=False),
     }
     db = FakeDB(mode_access_by_role=mapping)
-    user = SimpleNamespace(role="EXAM_PROCTOR")
+    user = SimpleNamespace(role="INSTRUCTOR")
 
     assert check_mode_access(user, "TESTING", db=db) is True
     assert check_mode_access(user, "LEARNING", db=db) is False

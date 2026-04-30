@@ -37,7 +37,7 @@ def test_ensure_student_role_allows_student() -> None:
 
 def test_ensure_student_role_rejects_non_student() -> None:
     with pytest.raises(HTTPException) as exc:
-        _ensure_student_role(SimpleNamespace(role="LECTURER"))
+        _ensure_student_role(SimpleNamespace(role="INSTRUCTOR"))
 
     assert exc.value.status_code == 403
 

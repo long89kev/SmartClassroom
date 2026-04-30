@@ -89,8 +89,8 @@ def get_user_permissions(user: User, db: Session) -> Set[str]:
 
 def get_user_room_scope(user: User, db: Session) -> List[UUID]:
     """Get list of room IDs accessible to user (empty if no restrictions)"""
-    if user.role in {"SYSTEM_ADMIN", "ACADEMIC_BOARD", "CLEANING_STAFF"}:
-        return []  # No restriction for these roles
+    if user.role in {"ACADEMIC_MANAGER"}:
+        return []  # No restriction for admin
     
     assignments = db.query(UserRoomAssignment.room_id).filter(
         UserRoomAssignment.user_id == user.id
@@ -99,7 +99,7 @@ def get_user_room_scope(user: User, db: Session) -> List[UUID]:
 
 def get_user_block_scope(user: User, db: Session) -> List[UUID]:
     """Get list of floor/block IDs accessible to user"""
-    if user.role in {"SYSTEM_ADMIN", "CLEANING_STAFF"}:
+    if user.role in {"ACADEMIC_MANAGER"}:
         return []  # No restriction
     
     assignments = db.query(UserBlockAssignment.floor_id).filter(
@@ -131,9 +131,9 @@ def require_permission(*required_perms: str):
     return perm_check
 
 def require_room_scope(room_id: UUID):
-    """Dependency to enforce room scope access (for LECTURER role)"""
+    """Dependency to enforce room scope access (for INSTRUCTOR role)"""
     async def room_check(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
-        if current_user.role in {"SYSTEM_ADMIN", "ACADEMIC_BOARD"}:
+        if current_user.role in {"ACADEMIC_MANAGER"}:
             return current_user  # No restriction
         
         # Check if user is assigned to this room
@@ -153,7 +153,7 @@ def require_room_scope(room_id: UUID):
 def require_block_scope(floor_id: UUID):
     """Dependency to enforce block/floor scope access"""
     async def block_check(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
-        if current_user.role in {"SYSTEM_ADMIN"}:
+        if current_user.role in {"ACADEMIC_MANAGER"}:
             return current_user  # No restriction
         
         # Check if user is assigned to this floor
@@ -172,7 +172,7 @@ def require_block_scope(floor_id: UUID):
 
 def check_mode_access(user: User, mode: str, db: Session) -> bool:
     """Check if user can access a specific mode (LEARNING or TESTING)"""
-    if user.role == "SYSTEM_ADMIN":
+    if user.role == "ACADEMIC_MANAGER":
         return True
     
     mode_access = db.query(RoleModeAccess).filter(
@@ -226,7 +226,7 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     
     # Normalize role
     normalized_role = user_data.role.upper() if user_data.role else "STUDENT"
-    valid_roles = {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN", "FACILITY_STAFF", "CLEANING_STAFF", "STUDENT"}
+    valid_roles = {"INSTRUCTOR", "ACADEMIC_MANAGER", "FACILITY_STAFF", "STUDENT"}
     if normalized_role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {','.join(valid_roles)}")
 
@@ -290,12 +290,12 @@ async def create_user(
     username: str,
     password: str,
     email: Optional[str] = None,
-    role: str = "LECTURER",
+    role: str = "INSTRUCTOR",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Create new user (system admin only)"""
-    if current_user.role != "SYSTEM_ADMIN":
+    if current_user.role != "ACADEMIC_MANAGER":
         raise HTTPException(status_code=403, detail="Only system admins can create users")
     
     # Check if username exists
@@ -303,11 +303,11 @@ async def create_user(
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
     
-    # Normalize role: ADMIN -> SYSTEM_ADMIN for backward compatibility
-    normalized_role = role.replace("ADMIN", "SYSTEM_ADMIN") if role == "ADMIN" else role.upper()
+    # Normalize role: ADMIN -> ACADEMIC_MANAGER for backward compatibility
+    normalized_role = role.replace("ADMIN", "ACADEMIC_MANAGER") if role == "ADMIN" else role.upper()
     
     # Validate role (canonical roles)
-    valid_roles = {"LECTURER", "EXAM_PROCTOR", "ACADEMIC_BOARD", "SYSTEM_ADMIN", "FACILITY_STAFF", "CLEANING_STAFF", "STUDENT"}
+    valid_roles = {"INSTRUCTOR", "ACADEMIC_MANAGER", "FACILITY_STAFF", "STUDENT"}
     if normalized_role not in valid_roles:
         raise HTTPException(status_code=400, detail=f"Invalid role. Valid roles: {','.join(valid_roles)}")
     
@@ -337,7 +337,7 @@ async def get_user(
     db: Session = Depends(get_db)
 ):
     """Get user info"""
-    if current_user.role != "SYSTEM_ADMIN" and current_user.id != user_id:
+    if current_user.role != "ACADEMIC_MANAGER" and current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     user = db.query(User).filter(User.id == user_id).first()
@@ -371,7 +371,7 @@ async def init_admin(
         username=username,
         email=f"{username}@classroom.local",
         password_hash=hash_password(password),
-        role="SYSTEM_ADMIN",
+        role="ACADEMIC_MANAGER",
         is_active=True
     )
     

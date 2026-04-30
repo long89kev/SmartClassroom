@@ -45,7 +45,7 @@ function isGroupKey(value: string): value is BuildingGroupKey {
 export function BuildingGroupPage(): JSX.Element {
   const { groupKey } = useParams<{ groupKey: string }>()
   const currentRole = useAuthStore((state) => state.user?.role)
-  const isSystemAdmin = currentRole === 'SYSTEM_ADMIN'
+  const isSystemAdmin = currentRole === 'ACADEMIC_MANAGER'
 
   const [buildings, setBuildings] = useState<BuildingOverview[]>([])
   const [query, setQuery] = useState('')
@@ -99,10 +99,7 @@ export function BuildingGroupPage(): JSX.Element {
   }, [buildings, query, validGroupKey])
 
   const totalRooms = useMemo(() => groupBuildings.reduce((sum, building) => sum + building.total_rooms, 0), [groupBuildings])
-  const totalActiveSessions = useMemo(
-    () => groupBuildings.reduce((sum, building) => sum + building.active_sessions_count, 0),
-    [groupBuildings],
-  )
+  const totalOnlineRooms = useMemo(() => groupBuildings.reduce((sum, building) => sum + building.rooms_online_count, 0), [groupBuildings])
 
   if (!meta) {
     return (
@@ -124,25 +121,25 @@ export function BuildingGroupPage(): JSX.Element {
           <p className="subcopy">{meta.description}</p>
 
           <div className="hero-metrics command-metrics">
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-safe">
               <Building2 size={18} />
               <div>
                 <strong>{groupBuildings.length}</strong>
                 <span>Buildings</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-warn">
               <DoorOpen size={18} />
               <div>
                 <strong>{totalRooms}</strong>
                 <span>Total Rooms</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
+            <article className="stat-card command-metric-card tone-neutral">
               <Radio size={18} />
               <div>
-                <strong>{totalActiveSessions}</strong>
-                <span>Active Sessions</span>
+                <strong>{totalOnlineRooms}</strong>
+                <span>Rooms Online</span>
               </div>
             </article>
           </div>
@@ -201,17 +198,17 @@ export function BuildingGroupPage(): JSX.Element {
                 </div>
 
                 <div className="building-kpis">
-                  <div className={`kpi-chip tone-${sessionTone}`}>
-                    <span className="kpi-label">Active Sessions</span>
-                    <strong>{building.active_sessions_count}</strong>
-                  </div>
                   <div className="kpi-chip tone-safe">
-                    <span className="kpi-label">Rooms Online</span>
-                    <strong>{building.rooms_online_count}</strong>
+                    <span className="kpi-label">Buildings</span>
+                    <strong>1</strong>
                   </div>
-                  <div className="kpi-chip tone-neutral">
+                  <div className="kpi-chip tone-warn">
                     <span className="kpi-label">Total Rooms</span>
                     <strong>{building.total_rooms}</strong>
+                  </div>
+                  <div className="kpi-chip tone-neutral">
+                    <span className="kpi-label">Rooms Online</span>
+                    <strong>{building.rooms_online_count}</strong>
                   </div>
                 </div>
               </Link>

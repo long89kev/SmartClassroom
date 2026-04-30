@@ -402,8 +402,11 @@ export async function exportAttendanceDashboard(
   return data
 }
 
-export async function getStudentWeeklySessions(weekStart?: string): Promise<StudentSessionCalendarItem[]> {
-  const params = weekStart ? { week_start: weekStart } : undefined
+export async function getStudentWeeklySessions(weekStart?: string, days = 7): Promise<StudentSessionCalendarItem[]> {
+  const params = {
+    ...(weekStart ? { week_start: weekStart } : {}),
+    days,
+  }
   const { data } = await api.get<StudentSessionCalendarItem[]>('/students/me/sessions', { params })
   return data
 }

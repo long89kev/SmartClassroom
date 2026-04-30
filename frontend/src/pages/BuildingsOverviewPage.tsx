@@ -65,7 +65,7 @@ function metricTone(value: number): 'safe' | 'warn' | 'danger' {
 
 export function BuildingsOverviewPage(): JSX.Element {
   const currentRole = useAuthStore((state) => state.user?.role)
-  const isAcademicBoard = currentRole === 'ACADEMIC_BOARD'
+  const isAcademicBoard = currentRole === 'ACADEMIC_MANAGER'
   const { hasAny } = usePermissions()
   const canAuditIncidents = hasAny([PERMISSIONS.INCIDENT_AUDIT, PERMISSIONS.INCIDENT_RESOLVE, PERMISSIONS.ALERT_ACKNOWLEDGE])
 
@@ -144,8 +144,8 @@ export function BuildingsOverviewPage(): JSX.Element {
     )
   }, [buildings, query])
 
-  const totalActiveSessions = useMemo(
-    () => buildings.reduce((sum, building) => sum + building.active_sessions_count, 0),
+  const totalRooms = useMemo(
+    () => buildings.reduce((sum, building) => sum + building.total_rooms, 0),
     [buildings],
   )
 
@@ -172,6 +172,7 @@ export function BuildingsOverviewPage(): JSX.Element {
           description: definition.description,
           buildingCount: groupBuildings.length,
           totalRooms: groupBuildings.reduce((sum, building) => sum + building.total_rooms, 0),
+          roomsOnline: groupBuildings.reduce((sum, building) => sum + building.rooms_online_count, 0),
           activeSessions: groupBuildings.reduce((sum, building) => sum + building.active_sessions_count, 0),
         }
       })
@@ -332,208 +333,7 @@ export function BuildingsOverviewPage(): JSX.Element {
     }
   }
 
-  if (isAcademicBoard) {
-    const recentIncidents = filteredBoardIncidents.slice(0, 8)
 
-    return (
-      <main className="page campus-bg">
-        <header className="hero-header">
-          <p className="eyebrow">Academic Board Intelligence</p>
-          <h1>Behavior and Risk Executive Dashboard</h1>
-          <p className="subcopy">
-            Board view focuses on student behavior quality, incident risk posture, and teacher behavior signals.
-          </p>
-
-          <div className="board-filter-strip panel">
-            <div className="filter-group">
-              <label htmlFor="board-window">Reporting Window</label>
-              <select
-                id="board-window"
-                value={boardWindow}
-                onChange={(event) => setBoardWindow(event.target.value as BoardWindowKey)}
-              >
-                <option value="7D">Last 7 days</option>
-                <option value="14D">Last 14 days</option>
-                <option value="30D">Last 30 days</option>
-              </select>
-            </div>
-            <p className="muted">Limited actions: acknowledge incidents. Classroom/device operations are hidden in this view.</p>
-          </div>
-
-          <div className="hero-metrics board-hero-metrics">
-            <article className="stat-card">
-              <Users2 size={18} />
-              <span>{boardStudentBehavior.totalEvents} Student Behavior Events</span>
-            </article>
-            <article className="stat-card">
-              <ShieldAlert size={18} />
-              <span>{boardRiskSummary.highCritical} High/Critical Incidents</span>
-            </article>
-            <article className="stat-card">
-              <AlertTriangle size={18} />
-              <span>{boardTeacherBehavior.incidentCount} Teacher-Behavior Incidents</span>
-            </article>
-            <article className="stat-card">
-              <Radio size={18} />
-              <span>Avg Risk Score {boardRiskSummary.avgRiskScore}</span>
-            </article>
-          </div>
-        </header>
-
-        {isLoading && <section className="panel">Loading campus context...</section>}
-        {error && <section className="panel error-panel">{error}</section>}
-        {isIncidentLoading && <section className="panel">Loading incident intelligence...</section>}
-        {incidentError && <section className="panel error-panel">{incidentError}</section>}
-
-        {!isLoading && !error && !isIncidentLoading && !incidentError && (
-          <section className="board-pillars-grid">
-            <article className="panel board-pillar-panel">
-              <header className="board-pillar-header">
-                <h2>Student Behavior</h2>
-                <span className="muted">{boardRiskSummary.uniqueStudents} students flagged</span>
-              </header>
-
-              <div className="board-kpi-row">
-                <div className="kpi-chip tone-neutral">
-                  <span className="kpi-label">Student behavior incidents</span>
-                  <strong>{filteredBoardIncidents.filter((incident) => getBehaviorCount(incident, STUDENT_BEHAVIOR_KEYS) > 0).length}</strong>
-                </div>
-                <div className="kpi-chip tone-warn">
-                  <span className="kpi-label">Total behavior events</span>
-                  <strong>{boardStudentBehavior.totalEvents}</strong>
-                </div>
-              </div>
-
-              <h3>Behavior Distribution</h3>
-              <ul className="board-ranked-list">
-                {boardStudentBehavior.ranked.slice(0, 6).map((item) => (
-                  <li key={item.key}>
-                    <span>{item.key.replace(/_/g, ' ')}</span>
-                    <strong>{item.count}</strong>
-                  </li>
-                ))}
-                {boardStudentBehavior.ranked.length === 0 && <li>No student behavior events in this window.</li>}
-              </ul>
-
-              <h3>Top At-Risk Sessions</h3>
-              <ul className="board-ranked-list compact">
-                {boardStudentBehavior.topRiskSessions.map((session) => (
-                  <li key={session.sessionId}>
-                    <span>Session {session.sessionId.slice(0, 8)}</span>
-                    <strong>{session.events} events</strong>
-                  </li>
-                ))}
-                {boardStudentBehavior.topRiskSessions.length === 0 && <li>No elevated sessions detected.</li>}
-              </ul>
-            </article>
-
-            <article className="panel board-pillar-panel">
-              <header className="board-pillar-header">
-                <h2>Incident Risk</h2>
-                <span className="muted">{boardRiskSummary.total} incidents in selected window</span>
-              </header>
-
-              <div className="board-kpi-row">
-                <div className="kpi-chip tone-danger">
-                  <span className="kpi-label">Open (unreviewed)</span>
-                  <strong>{boardRiskSummary.unreviewed}</strong>
-                </div>
-                <div className="kpi-chip tone-neutral">
-                  <span className="kpi-label">High + Critical</span>
-                  <strong>{boardRiskSummary.highCritical}</strong>
-                </div>
-              </div>
-
-              <h3>Severity Split</h3>
-              <ul className="board-ranked-list compact">
-                <li>
-                  <span>Critical</span>
-                  <strong>{boardRiskSummary.severity.CRITICAL}</strong>
-                </li>
-                <li>
-                  <span>High</span>
-                  <strong>{boardRiskSummary.severity.HIGH}</strong>
-                </li>
-                <li>
-                  <span>Medium</span>
-                  <strong>{boardRiskSummary.severity.MEDIUM}</strong>
-                </li>
-                <li>
-                  <span>Low</span>
-                  <strong>{boardRiskSummary.severity.LOW}</strong>
-                </li>
-              </ul>
-
-              <h3>Priority Incident Queue</h3>
-              <div className="incident-list board-incident-list">
-                {recentIncidents.map((incident) => (
-                  <article key={incident.id} className={`incident-item severity-${incident.risk_level.toLowerCase()}`}>
-                    <header>
-                      <strong>{incident.risk_level} ({incident.risk_score})</strong>
-                      <span className="muted">{formatDateTime(incident.flagged_at)}</span>
-                    </header>
-                    <p className="muted">Session {incident.session_id.slice(0, 8)} • Student {incident.student_id.slice(0, 8)}</p>
-                    <p className="muted">
-                      Behaviors: {Object.entries(incident.triggered_behaviors)
-                        .map(([key, value]) => `${key}(${value})`)
-                        .join(', ')}
-                    </p>
-                    {!incident.reviewed && canAuditIncidents ? (
-                      <button type="button" onClick={() => void handleAcknowledgeIncident(incident.id)}>
-                        Acknowledge
-                      </button>
-                    ) : null}
-                  </article>
-                ))}
-                {recentIncidents.length === 0 && <p className="muted">No incidents in selected window.</p>}
-              </div>
-              {incidentActionMessage && <p className="muted">{incidentActionMessage}</p>}
-            </article>
-
-            <article className="panel board-pillar-panel">
-              <header className="board-pillar-header">
-                <h2>Teacher Behavior</h2>
-                <span className="muted">{boardTeacherBehavior.incidentShare}% of incidents include teacher signals</span>
-              </header>
-
-              <div className="board-kpi-row">
-                <div className="kpi-chip tone-warn">
-                  <span className="kpi-label">Teacher behavior incidents</span>
-                  <strong>{boardTeacherBehavior.incidentCount}</strong>
-                </div>
-                <div className="kpi-chip tone-neutral">
-                  <span className="kpi-label">Teacher signal events</span>
-                  <strong>{boardTeacherBehavior.signalEvents}</strong>
-                </div>
-              </div>
-
-              <h3>Sessions Requiring Teaching Review</h3>
-              <ul className="board-ranked-list compact">
-                {boardTeacherBehavior.sessionRank.map((session) => (
-                  <li key={session.sessionId}>
-                    <span>Session {session.sessionId.slice(0, 8)}</span>
-                    <strong>{session.events} signals</strong>
-                  </li>
-                ))}
-                {boardTeacherBehavior.sessionRank.length === 0 && <li>No teacher behavior signals in this window.</li>}
-              </ul>
-
-              <h3>Daily Signal Trend</h3>
-              <ul className="board-ranked-list compact">
-                {boardTeacherBehavior.dailyTrend.map((day) => (
-                  <li key={day.date}>
-                    <span>{day.date}</span>
-                    <strong>{day.count}</strong>
-                  </li>
-                ))}
-                {boardTeacherBehavior.dailyTrend.length === 0 && <li>No trend data available in this window.</li>}
-              </ul>
-            </article>
-          </section>
-        )}
-      </main>
-    )
-  }
 
   return (
     <main className="page campus-bg">
@@ -547,23 +347,23 @@ export function BuildingsOverviewPage(): JSX.Element {
             Monitor buildings, session health, and room readiness from one operations workspace.
           </p>
 
-          <div className="hero-metrics command-metrics">
-            <article className="stat-card command-metric-card">
+          <div className="hero-metrics command-metrics admin-hero-metrics">
+            <article className="stat-card command-metric-card tone-safe">
               <Building2 size={18} />
               <div>
                 <strong>{buildings.length}</strong>
                 <span>Total Buildings</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
-              <Radio size={18} />
+            <article className="stat-card command-metric-card tone-warn">
+              <DoorOpen size={18} />
               <div>
-                <strong>{totalActiveSessions}</strong>
-                <span>Active Sessions</span>
+                <strong>{totalRooms}</strong>
+                <span>Total Rooms</span>
               </div>
             </article>
-            <article className="stat-card command-metric-card">
-              <DoorOpen size={18} />
+            <article className="stat-card command-metric-card tone-neutral">
+              <Radio size={18} />
               <div>
                 <strong>{totalOnlineRooms}</strong>
                 <span>Rooms Online</span>
@@ -625,17 +425,17 @@ export function BuildingsOverviewPage(): JSX.Element {
                 </div>
 
                 <div className="building-kpis">
-                  <div className={`kpi-chip tone-${sessionTone}`}>
+                  <div className="kpi-chip tone-safe">
                     <span className="kpi-label">Buildings</span>
                     <strong>{group.buildingCount}</strong>
                   </div>
-                  <div className="kpi-chip tone-safe">
+                  <div className="kpi-chip tone-warn">
                     <span className="kpi-label">Total Rooms</span>
                     <strong>{group.totalRooms}</strong>
                   </div>
                   <div className="kpi-chip tone-neutral">
-                    <span className="kpi-label">Active Sessions</span>
-                    <strong>{group.activeSessions}</strong>
+                    <span className="kpi-label">Rooms Online</span>
+                    <strong>{group.roomsOnline}</strong>
                   </div>
                 </div>
               </Link>

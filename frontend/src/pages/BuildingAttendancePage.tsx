@@ -17,7 +17,7 @@ import { resolveBuildingFromRouteParam } from '../utils/buildingRoute'
 export function BuildingAttendancePage(): JSX.Element {
   const { buildingId } = useParams<{ buildingId: string }>()
   const currentRole = useAuthStore((state) => state.user?.role ?? null)
-  const canManageAttendanceConfig = currentRole === 'LECTURER' || currentRole === 'SYSTEM_ADMIN'
+  const canManageAttendanceConfig = currentRole === 'INSTRUCTOR' || currentRole === 'ACADEMIC_MANAGER'
 
   const [floors, setFloors] = useState<FloorSummary[]>([])
   const [rooms, setRooms] = useState<RoomSummary[]>([])

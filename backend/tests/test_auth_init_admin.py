@@ -43,13 +43,13 @@ def test_init_admin_creates_system_admin_role() -> None:
     result = asyncio.run(init_admin(username="admin", password="admin123", db=db))
 
     assert db.added_user is not None
-    assert db.added_user.role == "SYSTEM_ADMIN"
+    assert db.added_user.role == "ACADEMIC_MANAGER"
     assert db.added_user.username == "admin"
     assert db.added_user.is_active is True
     assert db.commit_called is True
     assert db.refresh_called is True
 
-    assert result["role"] == "SYSTEM_ADMIN"
+    assert result["role"] == "ACADEMIC_MANAGER"
     assert result["username"] == "admin"
 
 

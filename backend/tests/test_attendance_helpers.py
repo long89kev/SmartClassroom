@@ -12,8 +12,8 @@ from app.routers.attendance import (
 
 
 def test_ensure_attendance_role_allows_lecturer_and_admin() -> None:
-    _ensure_attendance_role(SimpleNamespace(role="LECTURER"))
-    _ensure_attendance_role(SimpleNamespace(role="SYSTEM_ADMIN"))
+    _ensure_attendance_role(SimpleNamespace(role="INSTRUCTOR"))
+    _ensure_attendance_role(SimpleNamespace(role="ACADEMIC_MANAGER"))
 
 
 def test_ensure_attendance_role_rejects_other_roles() -> None:
@@ -21,7 +21,7 @@ def test_ensure_attendance_role_rejects_other_roles() -> None:
         _ensure_attendance_role(SimpleNamespace(role="STUDENT"))
 
     assert exc.value.status_code == 403
-    assert "Only LECTURER or SYSTEM_ADMIN" in exc.value.detail
+    assert "Only INSTRUCTOR or ACADEMIC_MANAGER" in exc.value.detail
 
 
 def test_derive_student_statuses_present_late_absent_counts() -> None:

@@ -13,21 +13,44 @@ import type {
 } from '../types'
 
 const MINUTES_START = 7 * 60
-const MINUTES_END = 22 * 60
-const TOTAL_MINUTES = MINUTES_END - MINUTES_START
+const MINUTES_END = 19 * 60
+const TOTAL_MINUTES = MINUTES_END - MINUTES_START // 720 mins (12 hours)
 
-function getWeekStart(base: Date): Date {
+type ViewMode = 'DAY' | 'WEEK' | 'MONTH'
+
+function getRangeStart(base: Date, mode: ViewMode): Date {
   const copy = new Date(base)
-  const day = (copy.getDay() + 6) % 7
   copy.setHours(0, 0, 0, 0)
+  if (mode === 'DAY') return copy
+  if (mode === 'WEEK') {
+    const day = (copy.getDay() + 6) % 7
+    copy.setDate(copy.getDate() - day)
+    return copy
+  }
+  // MONTH: Start at the first day of the month, then back up to the nearest Monday
+  copy.setDate(1)
+  const day = (copy.getDay() + 6) % 7
   copy.setDate(copy.getDate() - day)
   return copy
 }
 
-function formatWeekRange(weekStart: Date): string {
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 6)
-  return `${weekStart.toLocaleDateString()} - ${weekEnd.toLocaleDateString()}`
+function getRangeDays(mode: ViewMode): number {
+  if (mode === 'DAY') return 1
+  if (mode === 'WEEK') return 7
+  return 35 // 5 weeks for month view
+}
+
+function formatRangeLabel(start: Date, mode: ViewMode): string {
+  if (mode === 'DAY') return start.toLocaleDateString()
+  if (mode === 'WEEK') {
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return `${start.toLocaleDateString()} - ${end.toLocaleDateString()}`
+  }
+  // MONTH: Show month name
+  const middle = new Date(start)
+  middle.setDate(start.getDate() + 15)
+  return middle.toLocaleDateString([], { month: 'long', year: 'numeric' })
 }
 
 function formatTimeLabel(iso: string): string {
@@ -61,7 +84,8 @@ function getSessionBlockStyle(session: StudentSessionCalendarItem): { top: strin
 
 export function StudentDashboardPage(): JSX.Element {
   const navigate = useNavigate()
-  const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()))
+  const [viewMode, setViewMode] = useState<ViewMode>('WEEK')
+  const [rangeStart, setRangeStart] = useState<Date>(() => getRangeStart(new Date(), 'WEEK'))
   const [sessions, setSessions] = useState<StudentSessionCalendarItem[]>([])
   const [summary, setSummary] = useState<StudentAttendanceSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -72,9 +96,10 @@ export function StudentDashboardPage(): JSX.Element {
     async function load(): Promise<void> {
       try {
         setError(null)
-        const weekStartIso = weekStart.toISOString()
+        const startIso = rangeStart.toISOString()
+        const days = getRangeDays(viewMode)
         const [sessionData, summaryData] = await Promise.all([
-          getStudentWeeklySessions(weekStartIso),
+          getStudentWeeklySessions(startIso, days),
           getStudentAttendanceSummary(30),
         ])
 
@@ -93,18 +118,23 @@ export function StudentDashboardPage(): JSX.Element {
     return () => {
       isMounted = false
     }
-  }, [weekStart])
+  }, [rangeStart, viewMode])
 
   const sessionsByDay = useMemo(() => {
+    const daysCount = getRangeDays(viewMode)
     const map = new Map<number, StudentSessionCalendarItem[]>()
-    for (let i = 0; i < 7; i += 1) {
+    for (let i = 0; i < daysCount; i += 1) {
       map.set(i, [])
     }
 
+    const startTime = rangeStart.getTime()
+
     sessions.forEach((session) => {
       const day = new Date(session.start_time)
-      const mondayIndex = (day.getDay() + 6) % 7
-      const bucket = map.get(mondayIndex)
+      day.setHours(0, 0, 0, 0)
+      const diffDays = Math.floor((day.getTime() - startTime) / (24 * 60 * 60 * 1000))
+
+      const bucket = map.get(diffDays)
       if (bucket) {
         bucket.push(session)
       }
@@ -115,32 +145,40 @@ export function StudentDashboardPage(): JSX.Element {
     }
 
     return map
-  }, [sessions])
+  }, [sessions, rangeStart, viewMode])
 
   const dayHeaders = useMemo(() => {
+    const daysCount = getRangeDays(viewMode)
     const labels: string[] = []
-    for (let i = 0; i < 7; i += 1) {
-      const date = new Date(weekStart)
-      date.setDate(weekStart.getDate() + i)
+    for (let i = 0; i < daysCount; i += 1) {
+      const date = new Date(rangeStart)
+      date.setDate(rangeStart.getDate() + i)
       labels.push(`${date.toLocaleDateString([], { weekday: 'short' })} ${date.getDate()}`)
     }
     return labels
-  }, [weekStart])
+  }, [rangeStart, viewMode])
 
-  function goToPreviousWeek(): void {
-    const next = new Date(weekStart)
-    next.setDate(weekStart.getDate() - 7)
-    setWeekStart(next)
+  function goToPrevious(): void {
+    const next = new Date(rangeStart)
+    const step = viewMode === 'MONTH' ? 28 : getRangeDays(viewMode)
+    next.setDate(rangeStart.getDate() - step)
+    setRangeStart(next)
   }
 
-  function goToNextWeek(): void {
-    const next = new Date(weekStart)
-    next.setDate(weekStart.getDate() + 7)
-    setWeekStart(next)
+  function goToNext(): void {
+    const next = new Date(rangeStart)
+    const step = viewMode === 'MONTH' ? 28 : getRangeDays(viewMode)
+    next.setDate(rangeStart.getDate() + step)
+    setRangeStart(next)
   }
 
-  function goToCurrentWeek(): void {
-    setWeekStart(getWeekStart(new Date()))
+  function goToToday(): void {
+    setRangeStart(getRangeStart(new Date(), viewMode))
+  }
+
+  function switchView(mode: ViewMode): void {
+    setViewMode(mode)
+    setRangeStart(getRangeStart(new Date(), mode))
   }
 
   return (
@@ -154,73 +192,111 @@ export function StudentDashboardPage(): JSX.Element {
         </p>
 
         <div className="student-kpi-header">
-          <article className="student-stat-tile">
+          <article className="student-stat-tile tone-safe">
             <strong>{summary?.present ?? 0}</strong>
             <p>Present (30 days)</p>
           </article>
-          <article className="student-stat-tile">
+          <article className="student-stat-tile tone-warn">
             <strong>{summary?.late ?? 0}</strong>
             <p>Late (30 days)</p>
           </article>
-          <article className="student-stat-tile">
+          <article className="student-stat-tile tone-danger">
             <strong>{summary?.absent ?? 0}</strong>
             <p>Absent (30 days)</p>
           </article>
-          <article className="student-stat-tile">
+          <article className="student-stat-tile tone-neutral">
             <strong>{summary?.total_sessions ?? sessions.length}</strong>
             <p>Total Sessions</p>
           </article>
         </div>
 
-        <div className="week-picker">
-          <button type="button" onClick={goToPreviousWeek}>Prev</button>
-          <strong className="active-week">{formatWeekRange(weekStart)}</strong>
-          <button type="button" onClick={goToNextWeek}>Next</button>
-          <button type="button" onClick={goToCurrentWeek}>Today</button>
+        <div className="week-picker dashboard-controls">
+          <div className="picker-nav">
+            <button type="button" onClick={goToPrevious}>Prev</button>
+            <strong className="active-week">{formatRangeLabel(rangeStart, viewMode)}</strong>
+            <button type="button" onClick={goToNext}>Next</button>
+            <button type="button" onClick={goToToday}>Today</button>
+          </div>
+
+          <div className="view-selector">
+            <button
+              type="button"
+              className={viewMode === 'DAY' ? 'active' : ''}
+              onClick={() => switchView('DAY')}
+            >
+              Day
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'WEEK' ? 'active' : ''}
+              onClick={() => switchView('WEEK')}
+            >
+              Week
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'MONTH' ? 'active' : ''}
+              onClick={() => switchView('MONTH')}
+            >
+              Month
+            </button>
+          </div>
         </div>
 
         {error ? <div className="error-panel">{error}</div> : null}
       </section>
 
-      <section className="student-dashboard-layout-full">
+      <section className={`student-dashboard-layout-full view-${viewMode.toLowerCase()}`}>
         <article className="panel">
-          <div className="schedule-grid">
-            <div className="schedule-time-axis">
-              {Array.from({ length: 16 }).map((_, index) => {
-                const hour = 7 + index
-                return (
-                  <div key={hour} className="schedule-time-mark">
-                    {`${hour.toString().padStart(2, '0')}:00`}
-                  </div>
-                )
-              })}
-            </div>
+          <div className={`schedule-grid view-${viewMode.toLowerCase()}`}>
+            {viewMode !== 'MONTH' && (
+              <div className="schedule-time-axis">
+                {Array.from({ length: 13 }).map((_, index) => {
+                  const hour = 7 + index
+                  return (
+                    <div key={hour} className="schedule-time-mark">
+                      {`${hour.toString().padStart(2, '0')}:00`}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
-            <div className="schedule-week-columns">
+            <div className={`schedule-columns layout-${viewMode.toLowerCase()}`}>
               {dayHeaders.map((header, index) => (
-                <div key={header} className="schedule-day-column-wrap">
+                <div key={`${header}-${index}`} className="schedule-day-column-wrap">
                   <header className="schedule-day-header">{header}</header>
                   <div className="schedule-day-column">
-                    {Array.from({ length: 16 }).map((_, slot) => (
-                      <div key={`${header}-${slot}`} className="schedule-slot" />
-                    ))}
+                    {viewMode !== 'MONTH' &&
+                      Array.from({ length: 12 }).map((_, slot) => (
+                        <div key={`${header}-${slot}`} className="schedule-slot" />
+                      ))}
 
                     {(sessionsByDay.get(index) ?? []).map((session) => {
-                      const style = getSessionBlockStyle(session)
+                      const style = viewMode === 'MONTH' ? {} : getSessionBlockStyle(session)
                       return (
                         <button
                           key={session.session_id}
                           type="button"
-                          className="schedule-block"
+                          className={`schedule-block ${viewMode === 'MONTH' ? 'month-block' : ''}`}
                           style={style}
                           onClick={() => navigate(`/students/me/sessions/${session.session_id}`)}
                         >
-                          <p className="schedule-block-title">{session.subject_code ?? session.subject_name ?? 'Session'}</p>
-                          <p className="schedule-block-time">
-                            {formatTimeLabel(session.start_time)} - {formatTimeLabel(session.end_time ?? session.start_time)}
+                          <p className="schedule-block-title">
+                            {session.subject_code ?? session.subject_name ?? 'Session'}
                           </p>
-                          <p className="schedule-block-room">{session.room_code ?? 'Room N/A'}</p>
-                          <span className={getAttendanceClass(session.attendance_status)}>{session.attendance_status}</span>
+                          {viewMode !== 'MONTH' && (
+                            <>
+                              <p className="schedule-block-time">
+                                {formatTimeLabel(session.start_time)} -{' '}
+                                {formatTimeLabel(session.end_time ?? session.start_time)}
+                              </p>
+                              <p className="schedule-block-room">{session.room_code ?? 'Room N/A'}</p>
+                            </>
+                          )}
+                          <span className={getAttendanceClass(session.attendance_status)}>
+                            {session.attendance_status}
+                          </span>
                         </button>
                       )
                     })}

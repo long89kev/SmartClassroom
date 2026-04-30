@@ -24,8 +24,8 @@ class IntervalUpdatePayload(BaseModel):
 
 
 def _ensure_admin_settings_access(current_user: User, db: Session) -> None:
-    if current_user.role != "SYSTEM_ADMIN":
-        raise HTTPException(status_code=403, detail="Only SYSTEM_ADMIN can update refresh interval settings")
+    if current_user.role != "ACADEMIC_MANAGER":
+        raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER can update refresh interval settings")
 
     user_permissions = get_user_permissions(current_user, db)
     if "deploy:system_settings" not in user_permissions:

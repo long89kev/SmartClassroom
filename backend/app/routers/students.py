@@ -100,6 +100,7 @@ def _get_first_recognized_event_map(
 @router.get("/sessions", response_model=List[StudentSessionCalendarItem])
 async def get_my_sessions(
     week_start: datetime | None = Query(default=None),
+    days: int = Query(default=7, ge=1, le=42),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -108,7 +109,7 @@ async def get_my_sessions(
     if week_start is None:
         now = datetime.utcnow()
         week_start = datetime(now.year, now.month, now.day) - timedelta(days=now.weekday())
-    week_end = week_start + timedelta(days=7)
+    week_end = week_start + timedelta(days=days)
 
     sessions = (
         db.query(ClassSession)

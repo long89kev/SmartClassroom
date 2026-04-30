@@ -25,7 +25,7 @@ import { isUuidLikeBuildingId, normalizeBuildingCode, resolveBuildingFromRoutePa
 
 const ENABLE_ADMIN_REDESIGN = (
   (import.meta as ImportMeta & { env?: { VITE_ENABLE_ADMIN_REDESIGN?: string } }).env
-    ?.VITE_ENABLE_ADMIN_REDESIGN ?? 'true'
+    ?.VITE_ENABLE_ADMIN_REDESIGN ?? 'false'
 ) !== 'false'
 
 function AuthenticatedLayout(): JSX.Element {
@@ -84,12 +84,12 @@ function AuthenticatedLayout(): JSX.Element {
     navigate('/login', { replace: true })
   }
 
-  const isLecturerOrProctor = user?.role === 'LECTURER' || user?.role === 'EXAM_PROCTOR'
+  const isLecturerOrProctor = user?.role === 'INSTRUCTOR' || user?.role === 'INSTRUCTOR'
   const isStudentLanding = user?.role === 'STUDENT' && location.pathname === '/students/me/dashboard'
   const isLecturerOrProctorLanding = isLecturerOrProctor && /^\/buildings\/[^/]+$/.test(location.pathname)
   const isGlobalPage = ['/devices', '/attendance', '/admin/settings'].includes(location.pathname)
   const showBack = location.pathname !== '/' && !isStudentLanding && !isLecturerOrProctorLanding && !isGlobalPage
-  const isSystemAdmin = user?.role === 'SYSTEM_ADMIN'
+  const isSystemAdmin = user?.role === 'ACADEMIC_MANAGER'
 
   const match = location.pathname.match(/^\/buildings\/([^/]+)/)
   const buildingIdContext = match ? match[1] : undefined
@@ -119,27 +119,33 @@ function AuthenticatedLayout(): JSX.Element {
           </div>
 
           <nav className="auth-topbar-center" aria-label="Main Navigation">
-            <Link
-              to={buildingIdContext ? `/buildings/${buildingIdContext}/sessions` : '/'}
-              className={`header-nav-link ${activeSection === 'sessions' ? 'is-active' : ''}`}
-            >
-              <School size={16} />
-              <span>Sessions</span>
-            </Link>
-            <Link
-              to={buildingIdContext ? `/buildings/${buildingIdContext}/devices` : '/devices'}
-              className={`header-nav-link ${activeSection === 'devices' ? 'is-active' : ''}`}
-            >
-              <Monitor size={16} />
-              <span>Devices</span>
-            </Link>
-            <Link
-              to="/attendance"
-              className={`header-nav-link ${activeSection === 'attendance' ? 'is-active' : ''}`}
-            >
-              <ActivitySquare size={16} />
-              <span>Attendance</span>
-            </Link>
+            {user?.role !== 'FACILITY_STAFF' && user?.role !== 'STUDENT' && (
+              <Link
+                to={buildingIdContext ? `/buildings/${buildingIdContext}/sessions` : '/'}
+                className={`header-nav-link ${activeSection === 'sessions' ? 'is-active' : ''}`}
+              >
+                <School size={16} />
+                <span>Sessions</span>
+              </Link>
+            )}
+            {user?.role !== 'STUDENT' && (
+              <Link
+                to={buildingIdContext ? `/buildings/${buildingIdContext}/devices` : '/devices'}
+                className={`header-nav-link ${activeSection === 'devices' ? 'is-active' : ''}`}
+              >
+                <Monitor size={16} />
+                <span>Devices</span>
+              </Link>
+            )}
+            {user?.role !== 'FACILITY_STAFF' && user?.role !== 'STUDENT' && (
+              <Link
+                to="/attendance"
+                className={`header-nav-link ${activeSection === 'attendance' ? 'is-active' : ''}`}
+              >
+                <ActivitySquare size={16} />
+                <span>Attendance</span>
+              </Link>
+            )}
           </nav>
 
           <div className="auth-topbar-right">
@@ -172,8 +178,12 @@ function HomeRoute(): JSX.Element {
     return <Navigate to="/students/me/dashboard" replace />
   }
 
-  if (user?.role === 'LECTURER' || user?.role === 'EXAM_PROCTOR') {
+  if (user?.role === 'INSTRUCTOR' || user?.role === 'INSTRUCTOR') {
     return <ScopedClassroomHomeRoute />
+  }
+
+  if (user?.role === 'FACILITY_STAFF') {
+    return <Navigate to="/devices" replace />
   }
 
   return <BuildingsOverviewPage />
@@ -224,7 +234,7 @@ function BuildingRouteEntry(): JSX.Element {
   const role = useAuthStore((state) => state.user?.role)
   const isLegacyRequested = new URLSearchParams(location.search).get('legacy') === '1'
 
-  if (ENABLE_ADMIN_REDESIGN && role === 'SYSTEM_ADMIN' && buildingId && !isLegacyRequested) {
+  if (ENABLE_ADMIN_REDESIGN && role === 'ACADEMIC_MANAGER' && buildingId && !isLegacyRequested) {
     return <Navigate to={`/buildings/${buildingId}/sessions`} replace />
   }
 

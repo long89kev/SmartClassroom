@@ -131,13 +131,13 @@ export function BuildingDevicesPage(): JSX.Element {
 
   const isGlobalMode = !buildingId
   const canAccessGlobalWorkspace =
-    currentRole === 'SYSTEM_ADMIN' || currentRole === 'FACILITY_STAFF' || currentRole === 'CLEANING_STAFF'
+    currentRole === 'ACADEMIC_MANAGER' || currentRole === 'FACILITY_STAFF' || currentRole === 'FACILITY_STAFF'
 
   const canManageDevices = hasAny([PERMISSIONS.DEVICE_MANAGEMENT, PERMISSIONS.SYSTEM_SETTINGS])
   const canToggleDevices =
     canManageDevices ||
     hasAny([PERMISSIONS.ENV_LIGHT, PERMISSIONS.ENV_AC, PERMISSIONS.ENV_FAN]) ||
-    currentRole === 'CLEANING_STAFF'
+    currentRole === 'FACILITY_STAFF'
 
   const [buildings, setBuildings] = useState<BuildingOverview[]>([])
   const [roomDirectory, setRoomDirectory] = useState<RoomDirectoryItem[]>([])

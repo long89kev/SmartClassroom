@@ -29,10 +29,10 @@ def _ensure_session_role(current_user: User, allowed_roles: set[str]) -> None:
 
 
 def _ensure_room_scope(current_user: User, room_id: UUID, db: Session) -> None:
-    if current_user.role == "SYSTEM_ADMIN":
+    if current_user.role == "ACADEMIC_MANAGER":
         return
 
-    if current_user.role in {"LECTURER", "EXAM_PROCTOR"}:
+    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
         allowed_rooms = set(get_user_room_scope(current_user, db))
         if room_id not in allowed_rooms:
             raise HTTPException(status_code=403, detail="User not assigned to this room")
@@ -144,7 +144,7 @@ async def create_session(
     db: Session = Depends(get_db)
 ):
     """Start a new class session (NORMAL or TESTING mode)"""
-    _ensure_session_role(current_user, {"LECTURER", "EXAM_PROCTOR", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_session_permissions(current_user, db, {"mode:switch_learning", "mode:switch_testing"})
 
     # Validate room, teacher, subject exist
@@ -207,7 +207,7 @@ async def list_sessions(
 
     query = db.query(ClassSession)
 
-    if current_user.role in {"LECTURER", "EXAM_PROCTOR"}:
+    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
         allowed_rooms = get_user_room_scope(current_user, db)
         query = query.filter(ClassSession.room_id.in_(allowed_rooms if allowed_rooms else [UUID("00000000-0000-0000-0000-000000000000")]))
 
@@ -259,7 +259,7 @@ async def get_tutor_room_context(
         db,
         {"dashboard:view_classroom", "dashboard:view_block", "dashboard:view_university", "dashboard:view_minimal"},
     )
-    _ensure_session_role(current_user, {"LECTURER", "EXAM_PROCTOR"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR"})
 
     allowed_room_ids = get_user_room_scope(current_user, db)
     if not allowed_room_ids:
@@ -375,13 +375,13 @@ async def get_current_session_target(
         {"dashboard:view_classroom", "dashboard:view_block", "dashboard:view_university", "dashboard:view_minimal"},
     )
 
-    if current_user.role not in {"LECTURER", "EXAM_PROCTOR", "SYSTEM_ADMIN"}:
+    if current_user.role not in {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"}:
         raise HTTPException(status_code=403, detail="Role cannot resolve session target")
 
     room_scope = get_user_room_scope(current_user, db)
     scoped_query = db.query(ClassSession).filter(ClassSession.status == "ACTIVE")
 
-    if current_user.role in {"LECTURER", "EXAM_PROCTOR"}:
+    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
         if not room_scope:
             return {
                 "session_id": None,
@@ -394,7 +394,7 @@ async def get_current_session_target(
             }
         scoped_query = scoped_query.filter(ClassSession.room_id.in_(room_scope))
 
-    if current_user.role == "LECTURER":
+    if current_user.role == "INSTRUCTOR":
         teacher = _resolve_teacher_for_user(current_user, db)
         if teacher:
             now_local = datetime.now()
@@ -495,7 +495,7 @@ async def change_session_mode(
     db: Session = Depends(get_db)
 ):
     """Switch session between NORMAL and TESTING mode"""
-    _ensure_session_role(current_user, {"LECTURER", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
@@ -547,7 +547,7 @@ async def ingest_learning_mode(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"LECTURER", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
     
     if session.status != "ACTIVE":
@@ -664,7 +664,7 @@ async def ingest_testing_mode(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"EXAM_PROCTOR", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
 
     if not check_mode_access(current_user, "TESTING", db):
@@ -772,7 +772,7 @@ async def ingest_behavior(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"LECTURER", "EXAM_PROCTOR", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
     
     if session.status != "ACTIVE":
@@ -1015,7 +1015,7 @@ async def end_session(
     db: Session = Depends(get_db)
 ):
     """End session and calculate final scores"""
-    _ensure_session_role(current_user, {"LECTURER", "EXAM_PROCTOR", "SYSTEM_ADMIN"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_session_permissions(current_user, db, {"mode:switch_learning", "mode:switch_testing"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()

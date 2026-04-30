@@ -131,17 +131,17 @@ async def get_attendance_stream_video_feed(current_user: User = Depends(get_curr
 
 
 def _ensure_attendance_role(current_user: User) -> None:
-    if current_user.role not in {"LECTURER", "SYSTEM_ADMIN"}:
-        raise HTTPException(status_code=403, detail="Only LECTURER or SYSTEM_ADMIN can access attendance APIs")
+    if current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER"}:
+        raise HTTPException(status_code=403, detail="Only INSTRUCTOR or ACADEMIC_MANAGER can access attendance APIs")
 
 
 def _ensure_attendance_dashboard_role(current_user: User) -> None:
-    if current_user.role not in {"SYSTEM_ADMIN", "ACADEMIC_BOARD", "FACILITY_STAFF", "LECTURER"}:
+    if current_user.role not in {"ACADEMIC_MANAGER", "ACADEMIC_MANAGER", "FACILITY_STAFF", "INSTRUCTOR"}:
         raise HTTPException(status_code=403, detail="Insufficient role for school-wide attendance dashboard")
 
 
 def _ensure_attendance_scope(current_user: User, room_id: UUID, db: Session) -> None:
-    if current_user.role == "SYSTEM_ADMIN":
+    if current_user.role == "ACADEMIC_MANAGER":
         return
 
     allowed_rooms = set(get_user_room_scope(current_user, db))
@@ -1094,9 +1094,9 @@ async def ingest_attendance_event(
     """
     Real attendance event ingest endpoint.
     Called by the PC attendance service (USB webcam face recognition).
-    Accepts LECTURER, SYSTEM_ADMIN, or EXAM_PROCTOR roles.
+    Accepts INSTRUCTOR, ACADEMIC_MANAGER, or INSTRUCTOR roles.
     """
-    if current_user.role not in {"LECTURER", "SYSTEM_ADMIN", "EXAM_PROCTOR"}:
+    if current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER", "INSTRUCTOR"}:
         raise HTTPException(status_code=403, detail="Insufficient role for attendance ingest")
 
     session = _get_session_or_404(db, session_id)

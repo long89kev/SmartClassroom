@@ -72,12 +72,9 @@ WHERE user_id IS NOT NULL;
 
 -- Stable demo accounts used by frontend and smoke tests.
 INSERT INTO users (id, username, email, password_hash, role, is_active) VALUES
-('550e8400-e29b-41d4-a716-446655440001'::UUID, 'lecturer_demo', 'le.minh.hoang@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'LECTURER', TRUE),
-('550e8400-e29b-41d4-a716-446655440002'::UUID, 'proctor_demo', 'tran.quoc.tuan@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'EXAM_PROCTOR', TRUE),
-('550e8400-e29b-41d4-a716-446655440003'::UUID, 'board_demo', 'academic.board@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'ACADEMIC_BOARD', TRUE),
-('550e8400-e29b-41d4-a716-446655440004'::UUID, 'admin_demo', 'sysadmin@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'SYSTEM_ADMIN', TRUE),
+('550e8400-e29b-41d4-a716-446655440001'::UUID, 'instructor_demo', 'le.minh.hoang@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'INSTRUCTOR', TRUE),
+('550e8400-e29b-41d4-a716-446655440004'::UUID, 'admin_demo', 'sysadmin@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'ACADEMIC_MANAGER', TRUE),
 ('550e8400-e29b-41d4-a716-446655440005'::UUID, 'facility_demo', 'facility.ops@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'FACILITY_STAFF', TRUE),
-('550e8400-e29b-41d4-a716-446655440006'::UUID, 'cleaning_demo', 'cleaning.team@smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'CLEANING_STAFF', TRUE),
 ('550e8400-e29b-41d4-a716-446655440007'::UUID, 'student_demo', '22110001@student.smartcampus.local', '$2b$12$EJS8Y5nGPwWhGhG/Wh9vgeu0oBPBSnq7xRvqgh5ubYst5xA4uz7JS', 'STUDENT', TRUE)
 ON CONFLICT (username) DO UPDATE SET
     email = EXCLUDED.email,
@@ -88,12 +85,9 @@ ON CONFLICT (username) DO UPDATE SET
 
 INSERT INTO role_mode_access (role, can_switch_to_testing, can_switch_to_learning, can_view_reports)
 VALUES
-    ('LECTURER', TRUE, TRUE, TRUE),
-    ('EXAM_PROCTOR', TRUE, FALSE, FALSE),
-    ('ACADEMIC_BOARD', FALSE, FALSE, TRUE),
-    ('SYSTEM_ADMIN', TRUE, TRUE, TRUE),
+    ('INSTRUCTOR', TRUE, TRUE, TRUE),
+    ('ACADEMIC_MANAGER', TRUE, TRUE, TRUE),
     ('FACILITY_STAFF', FALSE, TRUE, FALSE),
-    ('CLEANING_STAFF', FALSE, FALSE, FALSE),
     ('STUDENT', FALSE, FALSE, TRUE)
 ON CONFLICT (role) DO UPDATE SET
     can_switch_to_testing = EXCLUDED.can_switch_to_testing,
@@ -103,9 +97,7 @@ ON CONFLICT (role) DO UPDATE SET
 
 DO $$
 DECLARE
-    v_lecturer_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440001'::UUID;
-    v_proctor_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440002'::UUID;
-    v_board_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440003'::UUID;
+    v_instructor_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440001'::UUID;
     v_admin_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440004'::UUID;
     v_facility_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440005'::UUID;
     v_student_user_id CONSTANT UUID := '550e8400-e29b-41d4-a716-446655440007'::UUID;
@@ -473,7 +465,7 @@ BEGIN
     -- ------------------------------------------------------------------------
     UPDATE teachers
     SET user_id = NULL
-    WHERE user_id IN (v_lecturer_user_id, v_proctor_user_id)
+    WHERE user_id = v_instructor_user_id
       AND email NOT IN ('le.minh.hoang@smartcampus.local', 'tran.quoc.tuan@smartcampus.local');
 
     UPDATE students
@@ -483,8 +475,8 @@ BEGIN
 
     INSERT INTO teachers (id, name, email, user_id, phone, department, created_at, updated_at)
     VALUES
-        (uuid_generate_v4(), 'Le Minh Hoang', 'le.minh.hoang@smartcampus.local', v_lecturer_user_id, '0908000001', 'School of Computer Science and Engineering', NOW(), NOW()),
-        (uuid_generate_v4(), 'Tran Quoc Tuan', 'tran.quoc.tuan@smartcampus.local', v_proctor_user_id, '0908000002', 'Academic Testing Center', NOW(), NOW()),
+        (uuid_generate_v4(), 'Le Minh Hoang', 'le.minh.hoang@smartcampus.local', v_instructor_user_id, '0908000001', 'School of Computer Science and Engineering', NOW(), NOW()),
+        (uuid_generate_v4(), 'Tran Quoc Tuan', 'tran.quoc.tuan@smartcampus.local', NULL, '0908000002', 'Academic Testing Center', NOW(), NOW()),
         (uuid_generate_v4(), 'Nguyen Van An', 'an.nguyen@smartcampus.local', NULL, '0908000003', 'Information Technology', NOW(), NOW()),
         (uuid_generate_v4(), 'Pham Minh Duc', 'duc.pham@smartcampus.local', NULL, '0908000004', 'Electronics and Telecommunications', NOW(), NOW())
     ON CONFLICT (email) DO UPDATE SET
@@ -632,9 +624,9 @@ BEGIN
         updated_at
     )
     VALUES
-        (uuid_generate_v4(), 'SUBJECT', 'AI3307', 88.00, 8.00, 12.00, 'Core AI theory class baseline', v_board_user_id, NOW(), NOW()),
-        (uuid_generate_v4(), 'SUBJECT', 'EE2305', 90.00, 6.00, 10.00, 'Hands-on IoT lab attendance threshold', v_board_user_id, NOW(), NOW()),
-        (uuid_generate_v4(), 'SUBJECT', 'SE3315', 95.00, 3.00, 5.00, 'Exam-oriented subject requires near-perfect punctuality', v_board_user_id, NOW(), NOW())
+        (uuid_generate_v4(), 'SUBJECT', 'AI3307', 88.00, 8.00, 12.00, 'Core AI theory class baseline', v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), 'SUBJECT', 'EE2305', 90.00, 6.00, 10.00, 'Hands-on IoT lab attendance threshold', v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), 'SUBJECT', 'SE3315', 95.00, 3.00, 5.00, 'Exam-oriented subject requires near-perfect punctuality', v_admin_user_id, NOW(), NOW())
     ON CONFLICT (scope_type, scope_id) DO UPDATE SET
         min_attendance_rate = EXCLUDED.min_attendance_rate,
         max_late_rate = EXCLUDED.max_late_rate,
@@ -909,21 +901,21 @@ BEGIN
     -- 5. Demo room assignments, block scope, and timetable
     -- ------------------------------------------------------------------------
     DELETE FROM user_room_assignments
-    WHERE user_id IN (v_lecturer_user_id, v_proctor_user_id);
+    WHERE user_id IN (v_instructor_user_id, v_instructor_user_id);
 
     DELETE FROM user_block_assignments
-    WHERE user_id IN (v_board_user_id, v_facility_user_id);
+    WHERE user_id IN (v_admin_user_id, v_facility_user_id);
 
     INSERT INTO user_room_assignments (id, user_id, room_id, can_view, can_control, assigned_by, created_at, updated_at)
     VALUES
-        (uuid_generate_v4(), v_lecturer_user_id, v_ai_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
-        (uuid_generate_v4(), v_lecturer_user_id, v_iot_lab_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
-        (uuid_generate_v4(), v_lecturer_user_id, v_lecturer_spare_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
-        (uuid_generate_v4(), v_proctor_user_id, v_test_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW());
+        (uuid_generate_v4(), v_instructor_user_id, v_ai_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), v_instructor_user_id, v_iot_lab_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), v_instructor_user_id, v_lecturer_spare_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), v_instructor_user_id, v_test_room_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW());
 
     INSERT INTO user_block_assignments (id, user_id, floor_id, can_view, can_control, assigned_by, created_at, updated_at)
     VALUES
-        (uuid_generate_v4(), v_board_user_id, v_board_floor_id, TRUE, FALSE, v_admin_user_id, NOW(), NOW()),
+        (uuid_generate_v4(), v_admin_user_id, v_board_floor_id, TRUE, FALSE, v_admin_user_id, NOW(), NOW()),
         (uuid_generate_v4(), v_facility_user_id, v_facility_floor_id, TRUE, TRUE, v_admin_user_id, NOW(), NOW());
 
     DELETE FROM timetable
@@ -1365,7 +1357,7 @@ BEGIN
         (uuid_generate_v4(), v_session_test_completed, v_test_student_ids[8], 'DOOR_CAMERA_GATEWAY', 0.88, TRUE, (SELECT start_time FROM class_sessions WHERE id = v_session_test_completed) + INTERVAL '5 minutes', '{"arrival_type": "present", "camera_id": "door-cam-b1"}'::jsonb, NULL, NOW());
 
     DELETE FROM attendance_dashboard_exports
-    WHERE requested_by = v_board_user_id;
+    WHERE requested_by = v_admin_user_id;
 
     INSERT INTO attendance_dashboard_exports (
         id,
@@ -1377,7 +1369,7 @@ BEGIN
         status
     ) VALUES (
         uuid_generate_v4(),
-        v_board_user_id,
+        v_admin_user_id,
         'CSV',
         jsonb_build_object(
             'scope', 'A',
@@ -1398,7 +1390,7 @@ BEGIN
           AND cs.room_id IN (
               SELECT room_id
               FROM user_room_assignments
-              WHERE user_id = v_lecturer_user_id
+              WHERE user_id = v_instructor_user_id
           )
     ) THEN
         INSERT INTO class_sessions (

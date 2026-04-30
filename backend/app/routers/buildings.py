@@ -17,8 +17,8 @@ router = APIRouter(prefix="/api", tags=["Buildings & Navigation"])
 
 
 def _ensure_building_mutation_role(current_user: User) -> None:
-    if current_user.role != "SYSTEM_ADMIN":
-        raise HTTPException(status_code=403, detail="Only SYSTEM_ADMIN can modify building hierarchy")
+    if current_user.role != "ACADEMIC_MANAGER":
+        raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER can modify building hierarchy")
 
 
 def _ensure_building_permissions(current_user: User, db: Session, required_permissions: set[str]) -> None:

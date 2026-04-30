@@ -14,8 +14,8 @@ router = APIRouter(prefix="/api", tags=["IoT Auto-Rules"])
 
 
 def _ensure_rule_mutation_role(current_user: User) -> None:
-    if current_user.role not in {"SYSTEM_ADMIN", "FACILITY_STAFF"}:
-        raise HTTPException(status_code=403, detail="Only SYSTEM_ADMIN or FACILITY_STAFF can modify rules")
+    if current_user.role not in {"ACADEMIC_MANAGER", "FACILITY_STAFF"}:
+        raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER or FACILITY_STAFF can modify rules")
 
 
 def _ensure_rule_permissions(current_user: User, db: Session, required_permissions: set[str]) -> None:

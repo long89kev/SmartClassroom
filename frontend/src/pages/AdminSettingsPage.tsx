@@ -34,7 +34,7 @@ function getValue(values: Array<{ mode: RefreshIntervalMode; interval_ms: number
 export function AdminSettingsPage(): JSX.Element {
   const currentRole = useAuthStore((state) => state.user?.role)
   const { has } = usePermissions()
-  const canManageSystemSettings = currentRole === 'SYSTEM_ADMIN' && has(PERMISSIONS.SYSTEM_SETTINGS)
+  const canManageSystemSettings = currentRole === 'ACADEMIC_MANAGER' && has(PERMISSIONS.SYSTEM_SETTINGS)
 
   const [groups, setGroups] = useState<RefreshIntervalGroupRow[]>([])
   const [groupDraft, setGroupDraft] = useState<Record<string, { normal: string; testing: string }>>({})
@@ -170,7 +170,7 @@ export function AdminSettingsPage(): JSX.Element {
   if (!canManageSystemSettings) {
     return (
       <main className="page">
-        <section className="panel error-panel">Only SYSTEM_ADMIN with system settings permission can access this page.</section>
+        <section className="panel error-panel">Only ACADEMIC_MANAGER with system settings permission can access this page.</section>
       </main>
     )
   }
