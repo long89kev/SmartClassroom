@@ -1,7 +1,7 @@
 import type { JSX } from 'react'
 import { useEffect, useState } from 'react'
 import { BrowserRouter as Router, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { ActivitySquare, ArrowLeft, LogOut, Monitor, School, Settings } from 'lucide-react'
+import { ActivitySquare, ArrowLeft, LogOut, Monitor, School, Settings, UserCheck } from 'lucide-react'
 import './App.css'
 import { BuildingsOverviewPage } from './pages/BuildingsOverviewPage'
 import { BuildingGroupPage } from './pages/BuildingGroupPage'
@@ -11,6 +11,7 @@ import { BuildingDashboardPage } from './pages/BuildingDashboardPage'
 import { BuildingSessionsPage } from './pages/BuildingSessionsPage'
 import { BuildingDevicesPage } from './pages/BuildingDevicesPage'
 import { AttendanceCommandCenterPage } from './pages/AttendanceCommandCenterPage'
+import { StudentRankingPage } from './pages/StudentRankingPage'
 import { AdminSettingsPage } from './pages/AdminSettingsPage'
 import { SessionDetailPage } from './pages/SessionDetailPage'
 import { SessionCameraCapturePage } from './pages/SessionCameraCapturePage'
@@ -94,11 +95,13 @@ function AuthenticatedLayout(): JSX.Element {
   const match = location.pathname.match(/^\/buildings\/([^/]+)/)
   const buildingIdContext = match ? match[1] : undefined
 
-  const activeSection = location.pathname.includes('/devices') 
-    ? 'devices' 
-    : location.pathname.includes('/attendance') 
-      ? 'attendance' 
-      : 'sessions'
+  const activeSection = location.pathname.includes('/devices')
+    ? 'devices'
+    : location.pathname.includes('/attendance')
+      ? 'attendance'
+      : location.pathname.includes('/admin/settings')
+        ? 'settings'
+        : 'sessions'
 
   return (
     <>
@@ -138,26 +141,36 @@ function AuthenticatedLayout(): JSX.Element {
               </Link>
             )}
             {user?.role !== 'FACILITY_STAFF' && user?.role !== 'STUDENT' && (
-              <Link
-                to="/attendance"
-                className={`header-nav-link ${activeSection === 'attendance' ? 'is-active' : ''}`}
-              >
-                <ActivitySquare size={16} />
-                <span>Attendance</span>
-              </Link>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <Link
+                  to="/attendance"
+                  className={`header-nav-link ${activeSection === 'attendance' && !location.pathname.includes('/attendance/students') ? 'is-active' : ''}`}
+                >
+                  <ActivitySquare size={16} />
+                  <span>Attendance</span>
+                </Link>
+                {isSystemAdmin && (
+                  <Link
+                    to="/attendance/students"
+                    className={`header-nav-link ${location.pathname.includes('/attendance/students') ? 'is-active' : ''}`}
+                  >
+                    <UserCheck size={16} />
+                    <span>Students</span>
+                  </Link>
+                )}
+              </div>
             )}
           </nav>
 
           <div className="auth-topbar-right">
             {isSystemAdmin ? (
-              <button
-                type="button"
-                className="header-nav-link"
-                onClick={() => navigate('/admin/settings')}
+              <Link
+                to="/admin/settings"
+                className={`header-nav-link ${activeSection === 'settings' ? 'is-active' : ''}`}
               >
                 <Settings size={16} />
                 <span>Admin Settings</span>
-              </button>
+              </Link>
             ) : null}
             <button type="button" className="header-nav-link" onClick={handleLogout}>
               <LogOut size={16} />
@@ -308,6 +321,7 @@ function App() {
             <Route path="/devices" element={<DevicesGroupsOverviewPage />} />
             <Route path="/devices/groups/:groupKey" element={<DevicesGroupPage />} />
             <Route path="/attendance" element={<AttendanceCommandCenterPage />} />
+            <Route path="/attendance/students" element={<StudentRankingPage />} />
             <Route
               path="/buildings/:buildingId"
               element={(

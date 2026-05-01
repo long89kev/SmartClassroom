@@ -403,6 +403,24 @@ export interface AttendanceDashboardFilters {
   subject_id?: string
   session_id?: string
   day_of_week?: number
+  query?: string
+}
+
+export interface StudentRankingRow {
+  rank: number
+  student_id: string
+  student_code: string
+  student_name: string
+  student_class: string | null
+  attendance_rate: number
+  avg_performance_score: number
+  avg_risk_score: number
+  risk_level: 'CRITICAL' | 'HIGH' | 'STABLE'
+  total_sessions: number
+}
+
+export interface StudentRankingResponse {
+  rows: StudentRankingRow[]
 }
 
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'ABSENT'

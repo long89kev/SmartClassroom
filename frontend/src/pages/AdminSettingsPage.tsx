@@ -298,12 +298,34 @@ export function AdminSettingsPage(): JSX.Element {
               <option value="ROOM">Room Overrides</option>
             </select>
           </div>
-          <span>
-            {activeTab === 'GROUP' ? `${minInterval} - ${maxInterval} ms` : ''}
-            {activeTab === 'BUILDING' ? (buildingConfig?.building_code ?? '-') : ''}
-            {activeTab === 'ROOM' ? (roomConfig?.room_code ?? '-') : ''}
-          </span>
-        </div>
+            {activeTab === 'BUILDING' && (
+              <select 
+                value={selectedBuildingId} 
+                onChange={(event) => setSelectedBuildingId(event.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #c9c2b8', fontFamily: 'inherit' }}
+              >
+                {buildings.map((building) => (
+                  <option key={building.id} value={building.id}>
+                    {building.code ?? building.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {activeTab === 'ROOM' && (
+              <select 
+                value={selectedRoomId} 
+                onChange={(event) => setSelectedRoomId(event.target.value)}
+                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #c9c2b8', fontFamily: 'inherit' }}
+              >
+                <option value="">Select room</option>
+                {rooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {room.room_code}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
         {activeTab === 'GROUP' && (
           <div className="table-scroll">
@@ -378,19 +400,7 @@ export function AdminSettingsPage(): JSX.Element {
 
         {activeTab === 'BUILDING' && (
           <>
-            <div className="inline-filters" style={{ marginBottom: '1rem' }}>
-              <select 
-                value={selectedBuildingId} 
-                onChange={(event) => setSelectedBuildingId(event.target.value)}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #c9c2b8', fontFamily: 'inherit' }}
-              >
-                {buildings.map((building) => (
-                  <option key={building.id} value={building.id}>
-                    {building.code ?? building.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Inline filters moved to header */}
             {buildingConfig && (
               <div className="table-scroll">
                 <table className="settings-ratio-table">
@@ -452,21 +462,7 @@ export function AdminSettingsPage(): JSX.Element {
 
         {activeTab === 'ROOM' && (
           <>
-            <div className="inline-filters" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <select 
-                value={selectedRoomId} 
-                onChange={(event) => setSelectedRoomId(event.target.value)}
-                style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #c9c2b8', fontFamily: 'inherit' }}
-              >
-                <option value="">Select room</option>
-                {rooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.room_code}
-                  </option>
-                ))}
-              </select>
-              <span className="muted">{floors.length} floors / {rooms.length} rooms loaded</span>
-            </div>
+            {/* Inline filters moved to header */}
 
             {roomConfig && (
               <div className="table-scroll">

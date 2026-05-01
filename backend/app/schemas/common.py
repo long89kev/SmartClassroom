@@ -289,6 +289,23 @@ class AttendanceDashboardRankingResponse(BaseModel):
     rows: List[AttendanceDashboardRankingRow] = Field(default_factory=list)
 
 
+class AttendanceStudentRankingRow(BaseModel):
+    rank: int
+    student_id: UUID
+    student_code: str
+    student_name: str
+    student_class: Optional[str] = None
+    attendance_rate: float
+    avg_performance_score: float
+    avg_risk_score: float
+    risk_level: str  # CRITICAL, HIGH, STABLE
+    total_sessions: int
+
+
+class AttendanceStudentRankingResponse(BaseModel):
+    rows: List[AttendanceStudentRankingRow] = Field(default_factory=list)
+
+
 class StudentSessionCalendarItem(BaseModel):
     session_id: UUID
     subject_id: Optional[UUID] = None

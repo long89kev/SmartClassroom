@@ -14,9 +14,8 @@ import type {
   AttendanceDashboardFilters,
   AttendanceDashboardKpis,
   AttendanceDashboardRankingScope,
-  AttendanceDashboardRankingsResponse,
-  AttendanceDashboardTrendGranularity,
   AttendanceDashboardTrendResponse,
+  StudentRankingResponse,
   AttendanceHistoryEntry,
   AttendanceMockEventPayload,
   AttendanceSessionReport,
@@ -388,6 +387,11 @@ export async function getAttendanceDashboardRankings(
   const { data } = await api.get<AttendanceDashboardRankingsResponse>('/attendance/dashboard/rankings', {
     params: { ...filters, scope },
   })
+  return data
+}
+
+export async function getStudentRankings(filters: AttendanceDashboardFilters): Promise<StudentRankingResponse> {
+  const { data } = await api.get<StudentRankingResponse>('/attendance/dashboard/student-rankings', { params: filters })
   return data
 }
 

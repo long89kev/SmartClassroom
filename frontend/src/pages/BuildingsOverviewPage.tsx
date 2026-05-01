@@ -347,7 +347,7 @@ export function BuildingsOverviewPage(): JSX.Element {
             Monitor buildings, session health, and room readiness from one operations workspace.
           </p>
 
-          <div className="hero-metrics command-metrics admin-hero-metrics">
+          <div className="hero-metrics command-metrics">
             <article className="stat-card command-metric-card tone-safe">
               <Building2 size={18} />
               <div>

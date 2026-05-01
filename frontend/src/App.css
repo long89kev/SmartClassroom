@@ -76,7 +76,7 @@ p {
 }
 
 .admin-hero-metrics {
-  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
 .stat-card {
@@ -355,9 +355,7 @@ select {
   margin-bottom: 6px;
 }
 
-.admin-hero-metrics {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
+
 
 .admin-metric-stack {
   display: grid;
