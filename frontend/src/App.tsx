@@ -131,7 +131,7 @@ function AuthenticatedLayout(): JSX.Element {
                 <span>Sessions</span>
               </Link>
             )}
-            {user?.role !== 'STUDENT' && (
+            {user?.role !== 'STUDENT' && user?.role !== 'INSTRUCTOR' && (
               <Link
                 to={buildingIdContext ? `/buildings/${buildingIdContext}/devices` : '/devices'}
                 className={`header-nav-link ${activeSection === 'devices' ? 'is-active' : ''}`}
@@ -140,7 +140,7 @@ function AuthenticatedLayout(): JSX.Element {
                 <span>Devices</span>
               </Link>
             )}
-            {user?.role !== 'FACILITY_STAFF' && user?.role !== 'STUDENT' && (
+            {user?.role !== 'FACILITY_STAFF' && user?.role !== 'STUDENT' && user?.role !== 'INSTRUCTOR' && (
               <div style={{ display: 'flex', gap: '4px' }}>
                 <Link
                   to="/attendance"

@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { AttendanceLivePanel } from '../components/AttendanceLivePanel'
+import { ClassroomMapView } from '../components/ClassroomMapView'
 import {
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   Camera,
+  CheckCircle2,
   Monitor,
   School,
+  Settings,
 } from 'lucide-react'
+import { AdminBuildingLayout } from '../components/AdminBuildingLayout'
+import { isUuidLikeBuildingId, resolveBuildingFromRouteParam } from '../utils/buildingRoute'
+import { buildAttendanceStreamUrl } from '../utils/attendanceStream'
+import { getBuildingsOverview } from '../services/api'
 import {
   Bar,
   BarChart,
@@ -49,6 +57,7 @@ import {
 } from '../services/api'
 import type {
   AttendanceSessionReport,
+  BuildingOverview,
   DeviceCreatePayload,
   DeviceTypeItem,
   FloorSummary,
@@ -71,9 +80,24 @@ import { useAuthStore } from '../store/auth'
 type ModeFilter = 'NORMAL' | 'TESTING'
 type SeverityFilter = 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 type LeaderboardMetric = 'RISK' | 'PERFORMANCE'
-type DashboardView = 'DEVICES' | 'MODE'
+type DashboardView = 'DEVICES' | 'MODE' | 'DEVICE_SCREEN' | 'MODE_SCREEN'
+type ViewMode = 'DEVICE_SCREEN' | 'MODE_SCREEN'
 type DeviceCrudPanelView = 'FILTER' | 'CRUD'
 type DeviceInventoryWithRoom = RoomDeviceInventoryItem & { room_id: string; room_code: string | null }
+
+interface StreamStatusResponse {
+  session_id: string | null
+  is_running: boolean
+  total_recognized: number
+  camera_active: boolean
+  recognized_students: Array<{
+    student_code: string
+    student_name: string
+    confidence: number
+    timestamp: string
+  }>
+  last_recognition_at: string | null
+}
 
 function toSeverity(score: number): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
   if (score < 0.4) return 'LOW'
@@ -87,6 +111,16 @@ function ensureDataUri(value: string): string {
   return `data:image/jpeg;base64,${value}`
 }
 
+function formatClock(iso: string | null): string {
+  if (!iso) return '--:--'
+  try {
+    const date = new Date(iso)
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return '--:--'
+  }
+}
+
 function formatSensorReading(value: number, unit?: string | null): string {
   const normalizedUnit = unit?.trim() ?? ''
   if (normalizedUnit.toLowerCase() === 'people') {
@@ -98,8 +132,11 @@ function formatSensorReading(value: number, unit?: string | null): string {
 }
 
 export function BuildingDashboardPage(): JSX.Element {
-  const { buildingId } = useParams<{ buildingId: string }>()
+  const { buildingId: buildingIdParam } = useParams<{ buildingId: string }>()
   const navigate = useNavigate()
+
+  const [allBuildings, setAllBuildings] = useState<BuildingOverview[]>([])
+  const [resolvedBuildingId, setResolvedBuildingId] = useState<string | null>(null)
 
   const [floors, setFloors] = useState<FloorSummary[]>([])
   const [rooms, setRooms] = useState<RoomSummary[]>([])
@@ -118,6 +155,8 @@ export function BuildingDashboardPage(): JSX.Element {
   const [isSavingGraceConfig, setIsSavingGraceConfig] = useState(false)
   const [graceConfigMessage, setGraceConfigMessage] = useState<string | null>(null)
   const [thresholdDraft, setThresholdDraft] = useState<Record<string, { min: string; max: string; target: string; enabled: boolean }>>({})
+  const [thresholdMessage, setThresholdMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [isSavingThreshold, setIsSavingThreshold] = useState(false)
 
   const [selectedFloorId, setSelectedFloorId] = useState<string>('ALL')
   const [selectedRoomId, setSelectedRoomId] = useState<string>('ALL')
@@ -146,14 +185,21 @@ export function BuildingDashboardPage(): JSX.Element {
   const [isAddingDevice, setIsAddingDevice] = useState(false)
   const [createDeviceMessage, setCreateDeviceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
+  const [streamStatus, setStreamStatus] = useState<StreamStatusResponse | null>(null)
+  const [isStreamOnline, setIsStreamOnline] = useState(false)
+  const [lastLiveRefreshAt, setLastLiveRefreshAt] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('MODE_SCREEN')
+
   const [isStructureLoading, setIsStructureLoading] = useState(true)
   const [isLiveLoading, setIsLiveLoading] = useState(true)
   const [resolvedRefreshMs, setResolvedRefreshMs] = useState<number>(30000)
   const [error, setError] = useState<string | null>(null)
+
+  const buildingId = resolvedBuildingId
   const { has, hasAny } = usePermissions()
   const currentRole = useAuthStore((state) => state.user?.role ?? null)
-  const isTutorDashboard = currentRole === 'INSTRUCTOR'
-  const isProctorDashboard = currentRole === 'INSTRUCTOR'
+  const isTutorDashboard = currentRole === 'INSTRUCTOR' && modeFilter !== 'TESTING'
+  const isProctorDashboard = currentRole === 'INSTRUCTOR' && modeFilter === 'TESTING'
   const isFacilityDashboard = currentRole === 'FACILITY_STAFF'
   const isCleaningStaffDashboard = currentRole === 'FACILITY_STAFF'
   const isOperationsDashboard = isFacilityDashboard || isCleaningStaffDashboard
@@ -166,6 +212,7 @@ export function BuildingDashboardPage(): JSX.Element {
     hasAny([PERMISSIONS.ENV_LIGHT, PERMISSIONS.ENV_AC, PERMISSIONS.ENV_FAN]) ||
     currentRole === 'FACILITY_STAFF'
   const canManageThresholds = hasAny([PERMISSIONS.ENV_THRESHOLDS, PERMISSIONS.SYSTEM_SETTINGS])
+  const canEditRoomThresholds = canManageThresholds || isScopedClassroomDashboard
   const canManageAttendanceConfig = currentRole === 'INSTRUCTOR' || currentRole === 'ACADEMIC_MANAGER'
   const canSwitchLearningMode = has(PERMISSIONS.MODE_SWITCH_LEARNING)
   const canSwitchTestingMode = has(PERMISSIONS.MODE_SWITCH_TESTING)
@@ -187,6 +234,26 @@ export function BuildingDashboardPage(): JSX.Element {
   const shouldShowWorkspace = !isSystemAdmin || Boolean(selectedSessionId)
 
   useEffect(() => {
+    async function resolveContext(): Promise<void> {
+      try {
+        const buildings = await getBuildingsOverview()
+        setAllBuildings(buildings)
+
+        if (!buildingIdParam) {
+          setResolvedBuildingId(null)
+          return
+        }
+
+        const resolved = resolveBuildingFromRouteParam(buildings, buildingIdParam)
+        setResolvedBuildingId(resolved?.id ?? buildingIdParam)
+      } catch {
+        setResolvedBuildingId(buildingIdParam ?? null)
+      }
+    }
+    void resolveContext()
+  }, [buildingIdParam])
+
+  useEffect(() => {
     if (isProctorDashboard && modeFilter !== 'TESTING') {
       setModeFilter('TESTING')
     }
@@ -197,6 +264,12 @@ export function BuildingDashboardPage(): JSX.Element {
       setDashboardView('DEVICES')
     }
   }, [dashboardView, isOperationsDashboard])
+
+  useEffect(() => {
+    if (isTutorDashboard && viewMode !== 'DEVICE_SCREEN') {
+      setViewMode('DEVICE_SCREEN')
+    }
+  }, [isTutorDashboard, viewMode])
 
   const filteredRooms = useMemo(() => {
     if (selectedFloorId === 'ALL') return rooms
@@ -252,15 +325,18 @@ export function BuildingDashboardPage(): JSX.Element {
     return selectedRoom
   }, [isFacilityDashboard, selectedRoom, selectedRoomId])
 
-  const sensorReadingByDeviceType = useMemo(() => {
+  const sensorReadingByKey = useMemo(() => {
     const byKey = new Map<string, RoomSensorReadingItem>()
     roomSensorReadings.forEach((reading) => {
       byKey.set(reading.sensor_key.toUpperCase(), reading)
     })
+    return byKey
+  }, [roomSensorReadings])
 
+  const sensorReadingByDeviceType = useMemo(() => {
     const readingFor = (keys: string[]): string => {
       for (const key of keys) {
-        const row = byKey.get(key)
+        const row = sensorReadingByKey.get(key)
         if (row) {
           return formatSensorReading(row.value, row.unit)
         }
@@ -274,7 +350,82 @@ export function BuildingDashboardPage(): JSX.Element {
       FAN: readingFor(['HUMIDITY']),
       CAMERA: '-',
     }
-  }, [roomSensorReadings])
+  }, [sensorReadingByKey])
+
+  const deviceThresholdRows = useMemo(() => {
+    const thresholdByType = new Map<string, RoomThresholdConfigItem>()
+    roomThresholds.forEach((threshold) => {
+      thresholdByType.set(threshold.device_type_code.toUpperCase(), threshold)
+    })
+
+    const globalByType = new Map<string, ThresholdConfigItem>()
+    globalThresholds.forEach((threshold) => {
+      globalByType.set(threshold.device_type_code.toUpperCase(), threshold)
+    })
+
+    const typeCodes = new Set<string>()
+    deviceInventory.forEach((device) => {
+      if (device.device_type) {
+        typeCodes.add(device.device_type.toUpperCase())
+      }
+    })
+    roomThresholds.forEach((threshold) => {
+      if (threshold.device_type_code) {
+        typeCodes.add(threshold.device_type_code.toUpperCase())
+      }
+    })
+
+    const resolveSensorReading = (deviceTypeCode: string): RoomSensorReadingItem | null => {
+      const mapping: Record<string, string[]> = {
+        LIGHT: ['LIGHT'],
+        AC: ['TEMPERATURE', 'TEMP'],
+        FAN: ['HUMIDITY'],
+        CAMERA: [],
+      }
+
+      const candidates = mapping[deviceTypeCode] ?? [deviceTypeCode]
+      for (const candidate of candidates) {
+        const match = sensorReadingByKey.get(candidate)
+        if (match) {
+          return match
+        }
+      }
+      return null
+    }
+
+    return Array.from(typeCodes)
+      .sort((left, right) => left.localeCompare(right))
+      .map((deviceTypeCode) => {
+        const reading = resolveSensorReading(deviceTypeCode)
+        const threshold = thresholdByType.get(deviceTypeCode)
+        const globalThreshold = globalByType.get(deviceTypeCode)
+
+        return {
+          deviceTypeCode,
+          readingDisplay: reading ? formatSensorReading(reading.value, reading.unit) : '-',
+          unit: reading?.unit ?? '-',
+          minValue: threshold?.min_value ?? globalThreshold?.min_value ?? null,
+          targetValue: threshold?.target_value ?? globalThreshold?.target_value ?? null,
+          maxValue: threshold?.max_value ?? globalThreshold?.max_value ?? null,
+          enabled: threshold?.enabled ?? globalThreshold?.enabled ?? true,
+          source: threshold?.is_override ? 'Room' : 'Global',
+        }
+      })
+  }, [deviceInventory, globalThresholds, roomThresholds, sensorReadingByKey])
+
+  useEffect(() => {
+    if (!isScopedClassroomDashboard) return
+    const nextDraft: Record<string, { min: string; max: string; target: string; enabled: boolean }> = {}
+    deviceThresholdRows.forEach((row) => {
+      nextDraft[row.deviceTypeCode] = {
+        min: row.minValue == null ? '' : String(row.minValue),
+        max: row.maxValue == null ? '' : String(row.maxValue),
+        target: row.targetValue == null ? '' : String(row.targetValue),
+        enabled: row.enabled,
+      }
+    })
+    setThresholdDraft(nextDraft)
+  }, [deviceThresholdRows, isScopedClassroomDashboard])
 
   useEffect(() => {
     let isMounted = true
@@ -560,10 +711,12 @@ export function BuildingDashboardPage(): JSX.Element {
     }
 
     void loadLiveData()
+    void fetchStreamStatus()
 
     const refreshMs = resolvedRefreshMs
     const intervalId = window.setInterval(() => {
       void loadLiveData()
+      void fetchStreamStatus()
     }, refreshMs)
 
     return () => {
@@ -875,13 +1028,15 @@ export function BuildingDashboardPage(): JSX.Element {
 
   async function handleSaveRoomThreshold(deviceTypeCode: string): Promise<void> {
     if (!selectedRoom) return
-    if (!canManageThresholds) {
-      setError('You do not have permission to update room thresholds.')
+    if (!canEditRoomThresholds) {
+      setThresholdMessage({ type: 'error', text: 'You do not have permission to update room thresholds.' })
       return
     }
     const draft = thresholdDraft[deviceTypeCode]
     if (!draft) return
 
+    setIsSavingThreshold(true)
+    setThresholdMessage(null)
     try {
       await updateRoomThreshold(selectedRoom.id, deviceTypeCode, {
         min_value: draft.min === '' ? null : Number(draft.min),
@@ -890,19 +1045,27 @@ export function BuildingDashboardPage(): JSX.Element {
         enabled: draft.enabled,
       })
       await refreshDevices(selectedRoom.id)
+      setThresholdMessage({ type: 'success', text: `Room threshold updated for ${deviceTypeCode}.` })
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Failed to update room threshold')
+      setThresholdMessage({
+        type: 'error',
+        text: updateError instanceof Error ? updateError.message : 'Failed to update room threshold',
+      })
+    } finally {
+      setIsSavingThreshold(false)
     }
   }
 
   async function handleSaveGlobalThreshold(deviceTypeCode: string): Promise<void> {
-    if (!canManageThresholds) {
-      setError('You do not have permission to update global thresholds.')
+    if (!canManageThresholds || isScopedClassroomDashboard) {
+      setThresholdMessage({ type: 'error', text: 'You do not have permission to update global thresholds.' })
       return
     }
     const draft = thresholdDraft[deviceTypeCode]
     if (!draft) return
 
+    setIsSavingThreshold(true)
+    setThresholdMessage(null)
     try {
       await updateGlobalThreshold(deviceTypeCode, {
         min_value: draft.min === '' ? null : Number(draft.min),
@@ -912,8 +1075,14 @@ export function BuildingDashboardPage(): JSX.Element {
       })
       const globalThresholdData = await getGlobalThresholds()
       setGlobalThresholds(globalThresholdData)
+      setThresholdMessage({ type: 'success', text: `Global threshold updated for ${deviceTypeCode}.` })
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : 'Failed to update global threshold')
+      setThresholdMessage({
+        type: 'error',
+        text: updateError instanceof Error ? updateError.message : 'Failed to update global threshold',
+      })
+    } finally {
+      setIsSavingThreshold(false)
     }
   }
 
@@ -1051,6 +1220,28 @@ export function BuildingDashboardPage(): JSX.Element {
     }
   }
 
+  const fetchStreamStatus = async (): Promise<void> => {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 1800)
+
+    try {
+      const response = await fetch(buildAttendanceStreamUrl('/status'), { signal: controller.signal })
+      if (!response.ok) {
+        throw new Error('Service offline')
+      }
+
+      const payload = (await response.json()) as StreamStatusResponse
+      setStreamStatus(payload)
+      setIsStreamOnline(true)
+    } catch {
+      setStreamStatus(null)
+      setIsStreamOnline(false)
+    } finally {
+      window.clearTimeout(timeoutId)
+      setLastLiveRefreshAt(new Date().toISOString())
+    }
+  }
+
   async function handleSessionModeChange(mode: 'NORMAL' | 'TESTING'): Promise<void> {
     if (!selectedSessionId) return
     if (mode === 'NORMAL' && !canSwitchLearningMode) {
@@ -1124,6 +1315,241 @@ export function BuildingDashboardPage(): JSX.Element {
     }
   }
 
+  const sidebarContent = isScopedClassroomDashboard ? (
+    <div className="sessions-sidebar-stack">
+      <section className="sessions-sidebar-block">
+        <p className="sidebar-section-title">Assigned Classroom</p>
+        <div className="admin-side-context-box">
+          {!isScopedClassroomDashboard && (
+            <p className="muted">
+              Building: <strong>{allBuildings.find((b) => b.id === buildingId)?.code ?? buildingIdParam}</strong>
+            </p>
+          )}
+          <p className="muted">
+            Floor: <strong>{selectedFloor ? `F${selectedFloor.floor_number} ${selectedFloor.name ?? ''}`.trim() : '-'}</strong>
+          </p>
+          <p className="muted">Room: <strong>{selectedRoom?.room_code ?? 'No assigned room'}</strong></p>
+        </div>
+      </section>
+
+      {isTutorDashboard ? null : (
+        <section className="sessions-sidebar-block">
+          <p className="sidebar-section-title">View Mode</p>
+          <div className="view-mode-segment">
+            <button
+              type="button"
+              className={viewMode === 'DEVICE_SCREEN' ? 'active' : ''}
+              onClick={() => setViewMode('DEVICE_SCREEN')}
+            >
+              Device Screen
+            </button>
+            <button
+              type="button"
+              className={viewMode === 'MODE_SCREEN' ? 'active' : ''}
+              onClick={() => setViewMode('MODE_SCREEN')}
+            >
+              Mode Screen
+            </button>
+          </div>
+        </section>
+      )}
+
+      {canManageAttendanceConfig ? (
+        <section className="sessions-sidebar-block attendance-config-mini">
+          <div className="mini-card-header">
+            <h3>Attendance Config</h3>
+            <span>{graceMinutesDraft} min</span>
+          </div>
+
+          <label htmlFor="sessions-grace-range">Grace Minutes</label>
+          <input
+            id="sessions-grace-range"
+            type="range"
+            min={0}
+            max={90}
+            value={Number(graceMinutesDraft) || 0}
+            onChange={(event) => setGraceMinutesDraft(event.target.value)}
+            disabled={!selectedSessionId || isSavingGraceConfig}
+          />
+
+          <button
+            type="button"
+            onClick={() => void handleSaveGraceMinutes()}
+            disabled={!selectedSessionId || isSavingGraceConfig}
+          >
+            {isSavingGraceConfig ? 'Saving...' : 'Save Configuration'}
+          </button>
+
+          <p className="muted compact-note">
+            Current: Grace {attendanceReport?.grace_minutes ?? 10} min | Confidence {(attendanceReport?.min_confidence ?? 0.75).toFixed(2)}
+          </p>
+
+          {graceConfigMessage ? <p className="mini-message error">{graceConfigMessage}</p> : null}
+        </section>
+      ) : null}
+
+      <section className="sessions-sidebar-block live-attendance-mini">
+        <div className="mini-card-header">
+          <h3>Live Attendance</h3>
+          <span className={`service-pill ${isStreamOnline && streamStatus?.is_running ? 'online' : 'offline'}`}>
+            {isStreamOnline && streamStatus?.is_running ? 'SERVICE ONLINE' : 'SERVICE OFFLINE'}
+          </span>
+        </div>
+
+        <p className="muted compact-note">Auto-refreshing...</p>
+
+        <div className="live-mini-grid">
+          <article>
+            <span>Enrolled</span>
+            <strong>{attendanceReport?.totals.enrolled ?? 0}</strong>
+          </article>
+          <article>
+            <span>Present</span>
+            <strong>{attendanceReport?.totals.present ?? 0}</strong>
+          </article>
+          <article>
+            <span>Late</span>
+            <strong>{attendanceReport?.totals.late ?? 0}</strong>
+          </article>
+          <article>
+            <span>Absent</span>
+            <strong>{attendanceReport?.totals.absent ?? 0}</strong>
+          </article>
+        </div>
+
+        <div className="live-mini-roster">
+          <p>Roster</p>
+          <p className="muted compact-note">
+            {streamStatus && streamStatus.recognized_students.length > 0
+              ? `${streamStatus.recognized_students.length} recognition events`
+              : 'No records...'}
+          </p>
+        </div>
+
+        <p className="muted compact-note">Updated {formatClock(lastLiveRefreshAt)}</p>
+      </section>
+    </div>
+  ) : (
+    <>
+      <div className="filter-group">
+        <label htmlFor="floor-filter">Floor</label>
+        <select id="floor-filter" value={selectedFloorId} onChange={(event) => setSelectedFloorId(event.target.value)}>
+          <option value="ALL">All Floors</option>
+          {floors.map((floor) => (
+            <option key={floor.id} value={floor.id}>
+              Floor {floor.floor_number}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="filter-group">
+        <label htmlFor="room-filter">Room</label>
+        <select id="room-filter" value={selectedRoomId} onChange={(event) => setSelectedRoomId(event.target.value)}>
+          <option value="ALL">All Rooms</option>
+          {filteredRooms.map((room) => (
+            <option key={room.id} value={room.id}>
+              {room.room_code}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="filter-group">
+        <label htmlFor="screen-filter">Dashboard View Mode</label>
+        <select
+          id="screen-filter"
+          value={viewMode}
+          onChange={(event) => setViewMode(event.target.value as ViewMode)}
+        >
+          <option value="MODE_SCREEN">Session & Student List</option>
+          <option value="DEVICE_SCREEN">Device & Sensor Screen</option>
+        </select>
+      </div>
+
+      <section className="admin-side-section">
+        <div className="section-title-row">
+          <h3>Current Sessions</h3>
+          <span className="badge">{visibleSessions.length}</span>
+        </div>
+        <div className="admin-side-list">
+          {visibleSessions.length === 0 ? (
+            <p className="muted small">No active sessions for this scope.</p>
+          ) : (
+            visibleSessions.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                className={`admin-side-item ${s.id === selectedSessionId ? 'is-active' : ''}`}
+                onClick={() => handleSelectSession(s)}
+              >
+                <div className="asi-header">
+                  <strong>{s.room_code}</strong>
+                  <span className="asi-time">{formatClock(s.start_time)}</span>
+                </div>
+                <div className="asi-footer">
+                  <span>{s.subject_code}</span>
+                  <ArrowRight size={14} />
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </section>
+
+      {canManageAttendanceConfig ? (
+        <section className="admin-side-section attendance-config-sidebar">
+          <div className="section-title-row">
+            <h3>Attendance Config</h3>
+            {selectedSessionId && <Settings size={14} className="muted" />}
+          </div>
+
+          <div className="admin-side-form">
+            <div className="filter-group">
+              <label htmlFor="grace-minutes-input">Grace Minutes (0-90)</label>
+              <input
+                id="grace-minutes-input"
+                type="number"
+                min={0}
+                max={90}
+                step={1}
+                value={graceMinutesDraft}
+                onChange={(event) => setGraceMinutesDraft(event.target.value)}
+                disabled={!selectedSessionId || isSavingGraceConfig}
+              />
+            </div>
+            <button
+              type="button"
+              className="admin-btn-primary"
+              onClick={() => void handleSaveGraceMinutes()}
+              disabled={!selectedSessionId || isSavingGraceConfig}
+            >
+              {isSavingGraceConfig ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </div>
+
+          <div className="admin-side-footer-info">
+            <p className="muted small">
+              Grace: {attendanceReport?.grace_minutes ?? '-'}m | Conf: {attendanceReport?.min_confidence ?? '-'}
+            </p>
+            {graceConfigMessage ? <p className="small text-danger">{graceConfigMessage}</p> : null}
+          </div>
+        </section>
+      ) : null}
+    </>
+  )
+
+  const dashboardMetrics = [
+    { label: 'Unreviewed Alerts', value: unreviewedCount, tone: unreviewedCount > 0 ? 'danger' : 'neutral' as any },
+    { label: 'Active Sessions', value: visibleSessions.length, tone: visibleSessions.length > 0 ? 'safe' : 'neutral' as any },
+    { label: 'Room Devices', value: deviceStates.length, tone: 'neutral' as any },
+  ]
+
+  const roomDeviceRows = useMemo(
+    () => [...mergedDevices].sort((left, right) => left.device_id.localeCompare(right.device_id)),
+    [mergedDevices],
+  )
+
   if (!buildingId) {
     return (
       <main className="page">
@@ -1134,10 +1560,18 @@ export function BuildingDashboardPage(): JSX.Element {
 
   if (isSystemAdmin && !shouldShowWorkspace) {
     return (
-      <main className="page campus-bg admin-sessions-page">
+      <AdminBuildingLayout
+        buildingId={buildingId ?? undefined}
+        title="Sessions Management"
+        subtitle="Global overview of university sessions and risk alerts."
+        eyebrow="System Administration"
+        metrics={dashboardMetrics}
+        sidebarContent={sidebarContent}
+        wrapSidebarContentPanel={false}
+      >
         <section className="panel">
           <div className="section-title-row">
-            <h2>Sessions Table</h2>
+            <h2>University Sessions Table</h2>
             <span>{visibleSessions.length} records</span>
           </div>
 
@@ -1165,690 +1599,540 @@ export function BuildingDashboardPage(): JSX.Element {
                 </tr>
               </thead>
               <tbody>
-                {visibleSessions.map((session) => (
-                  <tr
-                    key={session.id}
-                    className="clickable-row"
-                    onClick={() => handleSelectSession(session)}
-                  >
-                    <td>{session.room_code || '-'}</td>
-                    <td>{session.mode}</td>
-                    <td>{session.status}</td>
-                    <td>{toLocalDateTime(session.start_time)}</td>
-                    <td>{session.risk_alerts_count}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            handleSelectSession(session)
-                          }}
-                        >
-                          Open
-                        </button>
-                      </div>
+                {visibleSessions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center muted py-8">
+                      No sessions found for this scope.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  visibleSessions.map((session) => (
+                    <tr
+                      key={session.id}
+                      className="clickable-row"
+                      onClick={() => handleSelectSession(session)}
+                    >
+                      <td>{session.room_code || '-'}</td>
+                      <td>{session.mode}</td>
+                      <td>
+                        <span className={`alp-status-badge alp-status-${session.status.toLowerCase()}`}>
+                          {session.status}
+                        </span>
+                      </td>
+                      <td>{toLocalDateTime(session.start_time)}</td>
+                      <td>
+                        <span className={`risk-tag risk-${toSeverity(session.final_risk_score || 0).toLowerCase()}`}>
+                          {session.risk_alerts_count} alerts
+                        </span>
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn-link"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleSelectSession(session)
+                            }}
+                          >
+                            Select
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </section>
-      </main>
+      </AdminBuildingLayout>
     )
   }
 
   return (
-    <main className={`page split-layout campus-bg${isCleaningStaffDashboard ? ' cleaning-staff-dashboard' : ''}`}>
-      <aside className="left-sidebar panel">
-        <div className="sidebar-header">
-          <h1>Building Dashboard</h1>
-        </div>
+    <AdminBuildingLayout
+      buildingId={buildingId ?? undefined}
+      title={isScopedClassroomDashboard ? "Instructor Dashboard" : "Building Dashboard"}
+      subtitle={isScopedClassroomDashboard
+        ? `Monitoring live attendance and sessions for assigned classroom ${selectedRoom?.room_code ?? ''}`
+        : "Operational overview of building status, sessions, and IoT environment."
+      }
+      eyebrow={isScopedClassroomDashboard ? "Personal Workspace" : "Building Workspace"}
+      metrics={isCleaningStaffDashboard || isScopedClassroomDashboard ? [] : dashboardMetrics}
+      sidebarContent={sidebarContent}
+      wrapSidebarContentPanel={false}
+    >
+      {(isStructureLoading || isLiveLoading) && <section className="panel">Refreshing dashboard data...</section>}
+      {error && <section className="panel error-panel">{error}</section>}
 
-        {isScopedClassroomDashboard ? (
-          <div className="filter-group">
-            <label>Assigned Classroom Context</label>
-            <p className="muted">Building: {buildingId ?? '-'}</p>
-            <p className="muted">
-              Floor: {selectedFloor ? `F${selectedFloor.floor_number} ${selectedFloor.name ?? ''}`.trim() : '-'}
-            </p>
-            <p className="muted">Room: {selectedRoom?.room_code ?? 'No assigned room'}</p>
-          </div>
-        ) : (
-          <>
-            <div className="filter-group">
-              <label htmlFor="floor-filter">Floor</label>
-              <select id="floor-filter" value={selectedFloorId} onChange={(event) => setSelectedFloorId(event.target.value)}>
-                <option value="ALL">All Floors</option>
-                {floors.map((floor) => (
-                  <option key={floor.id} value={floor.id}>
-                    Floor {floor.floor_number}
-                  </option>
-                ))}
-              </select>
-            </div>
+      {canManageAttendanceConfig && selectedSessionId && !isScopedClassroomDashboard ? (
+        <AttendanceLivePanel sessionId={selectedSessionId} />
+      ) : null}
 
-            <div className="filter-group">
-              <label htmlFor="room-filter">Room</label>
-              <select id="room-filter" value={selectedRoomId} onChange={(event) => setSelectedRoomId(event.target.value)}>
-                <option value="ALL">All Rooms</option>
-                {filteredRooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.room_code}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </>
-        )}
-
-        <div className="filter-group">
-          <label htmlFor="screen-filter">Dashboard Screen</label>
-          <select
-            id="screen-filter"
-            value={dashboardView}
-            onChange={(event) => setDashboardView(event.target.value as DashboardView)}
-          >
-            <option value="DEVICES">Device Main Screen</option>
-            {!isOperationsDashboard ? <option value="MODE">Mode Info Screen</option> : null}
-          </select>
-        </div>
-
-        {canManageAttendanceConfig ? (
-          <section className="panel">
-            <div className="section-title-row">
-              <h2>Attendance Config</h2>
-              <span>{selectedSessionId ? 'Session-scoped' : 'No session selected'}</span>
-            </div>
-
-            <div className="inline-filters">
-              <div className="filter-group">
-                <label htmlFor="grace-minutes-input">Grace Minutes (0-90)</label>
-                <input
-                  id="grace-minutes-input"
-                  type="number"
-                  min={0}
-                  max={90}
-                  step={1}
-                  value={graceMinutesDraft}
-                  onChange={(event) => setGraceMinutesDraft(event.target.value)}
-                  disabled={!selectedSessionId || isSavingGraceConfig}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleSaveGraceMinutes()}
-                disabled={!selectedSessionId || isSavingGraceConfig}
-              >
-                {isSavingGraceConfig ? 'Saving...' : 'Save Grace Time'}
-              </button>
-            </div>
-
-            <p className="muted">
-              Current config: Grace {attendanceReport?.grace_minutes ?? '-'} min | Confidence {attendanceReport?.min_confidence ?? '-'}
-            </p>
-            {graceConfigMessage ? <p className="muted">{graceConfigMessage}</p> : null}
-          </section>
-        ) : null}
-
-        {/* Live Attendance Panel — shown when a session is selected */}
-        {canManageAttendanceConfig && selectedSessionId ? (
-          <AttendanceLivePanel sessionId={selectedSessionId} />
-        ) : null}
-
-      </aside>
-
-      <section className="right-content">
-        {(isStructureLoading || isLiveLoading) && <section className="panel">Refreshing dashboard data...</section>}
-        {error && <section className="panel error-panel">{error}</section>}
-
-        {!isCleaningStaffDashboard ? (
-          <section className="panel kpi-row">
-            {!isOperationsDashboard && (
-              <article className="kpi-tile danger">
-                <AlertTriangle size={18} />
-                <div>
-                  <p>Unreviewed Alerts</p>
-                  <strong>{unreviewedCount}</strong>
+      {isScopedClassroomDashboard ? (
+        <>
+              <section className="panel device-screen-panel">
+                <div className="section-title-row">
+                  <h3>Device Screen</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span>{selectedRoom ? selectedRoom.room_code : 'Select a room to view devices'}</span>
+                  </div>
                 </div>
-              </article>
-            )}
-            {!isOperationsDashboard && (
-              <article className="kpi-tile warn">
-                <School size={18} />
-                <div>
-                  <p>Active Sessions</p>
-                  <strong>{visibleSessions.length}</strong>
-                </div>
-              </article>
-            )}
-            <article className="kpi-tile safe">
-              <Monitor size={18} />
-              <div>
-                <p>Room Devices</p>
-                <strong>{deviceStates.length}</strong>
-              </div>
-            </article>
-          </section>
-        ) : null}
 
-        <section className="panel">
-          {isOperationsDashboard ? (
-            <>
-              <div className="section-title-row">
-                <div>
-                  <h2>Device Operations Table</h2>
-                  <span>{facilityDeviceGroups.length} rooms / {filteredDevices.length} devices</span>
-                </div>
-              </div>
-              <p className="muted">
-                Room filter: {selectedRoomId === 'ALL' ? 'All rooms in current building scope' : selectedRoom?.room_code ?? 'No room selected'}
-              </p>
+              {selectedRoomId === 'ALL' ? (
+                <p className="muted device-screen-empty">Select a room to load devices.</p>
+              ) : roomDeviceRows.length === 0 ? (
+                <p className="muted device-screen-empty">No devices were found for the selected room.</p>
+              ) : (
+                <div className="device-split-layout">
+                  <div className="table-scroll">
+                    <table className="device-screen-table">
+                      <thead>
+                        <tr>
+                          <th>Device ID</th>
+                          <th>Type</th>
+                          <th>Location</th>
+                          <th>Power (W)</th>
+                          <th>Status</th>
+                          <th>Last Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roomDeviceRows.map((device) => {
+                          const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
 
-              {facilityDeviceGroups.length > 0 && (
-                <div className="facility-room-groups">
-                  {facilityDeviceGroups.map((group) => (
-                    <article key={group.room_id} className="room-device-group panel">
-                      <div className="section-title-row">
-                        <h3>Room {group.room_code}</h3>
-                        <span>{group.devices.length} devices</span>
-                      </div>
-
-                      <div className="table-scroll">
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Device</th>
-                              <th>Type</th>
-                              <th>Location</th>
-                              {!canOnlyToggleDevices ? <th>Power (W)</th> : null}
-                              <th>Status</th>
-                              {!canOnlyToggleDevices ? <th>Last Updated</th> : null}
-                              <th>Actions</th>
+                          return (
+                            <tr key={device.device_id}>
+                              <td>{device.device_id}</td>
+                              <td>{device.device_type} {device.device_index}</td>
+                              <td>{device.location}</td>
+                              <td>{device.power_consumption_watts ?? 0}</td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
+                                  onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
+                                  disabled={!canToggleDevices}
+                                  title={canToggleDevices ? 'Click to toggle status' : 'View only'}
+                                >
+                                  {isOn ? 'ON' : 'OFF'}
+                                </button>
+                              </td>
+                              <td>{toLocalDateTime(device.last_updated)}</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {group.devices.map((device) => {
-                              const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
-                              const isEditing = editingDeviceId === device.device_id
-                              return (
-                                <tr key={`${device.room_id}:${device.device_id}`}>
-                                  <td>{device.device_id}</td>
-                                  <td>{device.device_type} {device.device_index}</td>
-                                  <td>
-                                    {!canOnlyToggleDevices && isEditing ? (
-                                      <div className="inline-filters">
-                                        <select
-                                          value={editingDeviceFrontBack}
-                                          onChange={(event) =>
-                                            setEditingDeviceFrontBack(event.target.value as 'FRONT' | 'BACK')
-                                          }
-                                        >
-                                          <option value="FRONT">FRONT</option>
-                                          <option value="BACK">BACK</option>
-                                        </select>
-                                        <select
-                                          value={editingDeviceLeftRight}
-                                          onChange={(event) =>
-                                            setEditingDeviceLeftRight(event.target.value as 'LEFT' | 'RIGHT')
-                                          }
-                                        >
-                                          <option value="LEFT">LEFT</option>
-                                          <option value="RIGHT">RIGHT</option>
-                                        </select>
-                                      </div>
-                                    ) : (
-                                      device.location
-                                    )}
-                                  </td>
-                                  {!canOnlyToggleDevices ? (
-                                    <td>
-                                      {device.power_consumption_watts ?? 0}
-                                    </td>
-                                  ) : null}
-                                  <td>
-                                    <button
-                                      type="button"
-                                      className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
-                                      onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
-                                      disabled={!canToggleDevices}
-                                      title={canToggleDevices ? "Click to toggle status" : "View only"}
-                                    >
-                                      {isOn ? 'ON' : 'OFF'}
-                                    </button>
-                                  </td>
-                                  {!canOnlyToggleDevices ? <td>{toLocalDateTime(device.last_updated ?? null)}</td> : null}
-                                  <td>
-                                    <div className="row-actions">
-                                      {!canOnlyToggleDevices ? (
-                                        <>
-                                          {isEditing ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => void handleUpdateDevice(device.device_id, device.room_id)}
-                                              disabled={!canManageDevices}
-                                            >
-                                              Save
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={() => openEditDevice(device)}
-                                              disabled={!canManageDevices}
-                                            >
-                                              Edit
-                                            </button>
-                                          )}
-                                          <button
-                                            type="button"
-                                            onClick={() => void handleDeleteDevice(device.device_id, device.room_id)}
-                                            disabled={!canManageDevices}
-                                          >
-                                            Delete
-                                          </button>
-                                        </>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </article>
-                  ))}
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <ClassroomMapView
+                    devices={roomDeviceRows}
+                    roomCode={selectedRoom?.room_code ?? undefined}
+                    disabled={!canToggleDevices}
+                    onToggle={(deviceId, action, roomId) => void handleToggleSingleDevice(deviceId, action, roomId)}
+                  />
                 </div>
               )}
+              </section>
 
-              {!isCleaningStaffDashboard && selectedRoomId === 'ALL' ? (
-                <p className="muted">Select a specific room from the left sidebar to manage devices.</p>
-              ) : null}
-
-              {!isCleaningStaffDashboard && selectedRoomId !== 'ALL' ? (
-                <article className="panel device-subpanel">
+              {selectedRoomId !== 'ALL' ? (
+                <section className="panel device-threshold-standalone">
                   <div className="section-title-row">
-                    <h3>CRUD Activities Panel</h3>
-                    <span>{targetCrudRoom ? targetCrudRoom.room_code : 'Select room'}</span>
+                    <h3>Device Readings &amp; Thresholds</h3>
+                    <span>{selectedRoom?.room_code ?? 'Selected room'}</span>
                   </div>
 
-                  {createDeviceMessage && (
-                    <div className={`message-banner ${createDeviceMessage.type}`}>
-                      {createDeviceMessage.text}
+                  <p className="muted">
+                    Current sensor readings and effective thresholds. Edit values, then save to room scope or global scope.
+                  </p>
+
+                  {thresholdMessage ? (
+                    <div className={`message-banner ${thresholdMessage.type}`}>
+                      {thresholdMessage.text}
                     </div>
-                  )}
+                  ) : null}
 
-                  <div className="device-create-grid">
-                    <select
-                      value={newDevice.device_type}
-                      onChange={(event) => setNewDevice((prev) => ({ ...prev, device_type: event.target.value }))}
-                    >
-                      <option value="LIGHT">LIGHT</option>
-                      <option value="AC">AC</option>
-                      <option value="FAN">FAN</option>
-                      <option value="CAMERA">CAMERA</option>
-                    </select>
-                    <select
-                      value={newDevice.location_front_back}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({
-                          ...prev,
-                          location_front_back: event.target.value as 'FRONT' | 'BACK',
-                        }))
-                      }
-                    >
-                      <option value="FRONT">FRONT</option>
-                      <option value="BACK">BACK</option>
-                    </select>
-                    <select
-                      value={newDevice.location_left_right}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({
-                          ...prev,
-                          location_left_right: event.target.value as 'LEFT' | 'RIGHT',
-                        }))
-                      }
-                    >
-                      <option value="LEFT">LEFT</option>
-                      <option value="RIGHT">RIGHT</option>
-                    </select>
-                    <input
-                      type="number"
-                      min={0}
-                      value={newDevice.power_consumption_watts ?? 0}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({ ...prev, power_consumption_watts: Number(event.target.value) }))
-                      }
-                      placeholder="Power (W)"
-                    />
-                    <button 
-                      type="button" 
-                      onClick={() => void handleAddDevice()} 
-                      disabled={!targetCrudRoom || !canManageDevices || isAddingDevice}
-                      className={isAddingDevice ? 'loading' : ''}
-                    >
-                      {isAddingDevice ? 'Creating...' : 'Create Device'}
-                    </button>
-                  </div>
-                </article>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <div className="section-title-row">
-                <h2>Sessions Table</h2>
-                <span>{visibleSessions.length} records</span>
-              </div>
-
-              <div className="table-scroll">
-                <table className="ratio-table sessions-ratio-table">
-                  <colgroup>
-                    <col className="col-room" />
-                    <col className="col-mode" />
-                    <col className="col-status" />
-                    <col className="col-start" />
-                    <col className="col-risk" />
-                    <col className="col-detail" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>Room</th>
-                      <th>Mode</th>
-                      <th>Status</th>
-                      <th>Start Time</th>
-                      <th>Risk Alerts</th>
-                      <th>Detail</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleSessions.map((session) => (
-                      <tr
-                        key={session.id}
-                        className={selectedSessionId === session.id ? 'selected-row clickable-row' : 'clickable-row'}
-                        onClick={() => {
-                          if (isScopedClassroomDashboard) {
-                            handleSelectSession(session)
-                            return
-                          }
-                          if (isSystemAdmin) {
-                            handleSelectSession(session)
-                            return
-                          }
-                          navigate(`/sessions/${session.id}`)
-                        }}
-                      >
-                        <td>{session.room_code || '-'}</td>
-                        <td>{session.mode}</td>
-                        <td>{session.status}</td>
-                        <td>{toLocalDateTime(session.start_time)}</td>
-                        <td>{session.risk_alerts_count}</td>
-                        <td>
-                          <div className="row-actions">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                if (isScopedClassroomDashboard) {
-                                  handleSelectSession(session)
-                                  return
-                                }
-                                if (isSystemAdmin) {
-                                  handleSelectSession(session)
-                                  return
-                                }
-                                navigate(`/sessions/${session.id}`)
-                              }}
-                            >
-                              {isScopedClassroomDashboard || isSystemAdmin ? 'Select' : 'Detail'}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </section>
-
-        {dashboardView === 'DEVICES' ? (
-          <>
-            {!isOperationsDashboard ? (
-              <>
-                <section className="panel">
-                  <div className="section-title-row">
-                    <h2>Session Detail</h2>
-                    <span>{selectedSession ? selectedSession.id.slice(0, 8) : 'No session selected'}</span>
-                  </div>
-                  {selectedSession ? (
+                  {deviceThresholdRows.length === 0 ? (
+                    <p className="muted">No readings or thresholds are available for this room yet.</p>
+                  ) : (
                     <div className="table-scroll">
-                      <table>
+                      <table className="device-screen-table">
+                        <thead>
+                          <tr>
+                            <th>Device Type</th>
+                            <th>Reading</th>
+                            <th>Unit</th>
+                            <th>Min</th>
+                            <th>Target</th>
+                            <th>Max</th>
+                            <th>Enabled</th>
+                            <th>Source</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
                         <tbody>
-                          <tr>
-                            <th>Room</th>
-                            <td>{selectedSession.room_code ?? '-'}</td>
-                            <th>Mode</th>
-                            <td>{selectedSession.mode}</td>
-                          </tr>
-                          <tr>
-                            <th>Status</th>
-                            <td>{selectedSession.status}</td>
-                            <th>Start</th>
-                            <td>{toLocalDateTime(selectedSession.start_time)}</td>
-                          </tr>
-                          <tr>
-                            <th>Risk Alerts</th>
-                            <td>{selectedSession.risk_alerts_count}</td>
-                            <th>Teacher</th>
-                            <td>{selectedSession.teacher_name ?? selectedSession.teacher_id}</td>
-                          </tr>
-                          <tr>
-                            <th>Subject</th>
-                            <td>{selectedSession.subject_name ?? selectedSession.subject_id}</td>
-                            <th>Session</th>
-                            <td>{selectedSession.id}</td>
-                          </tr>
+                          {deviceThresholdRows.map((row) => {
+                            const draft = thresholdDraft[row.deviceTypeCode] ?? {
+                              min: row.minValue == null ? '' : String(row.minValue),
+                              max: row.maxValue == null ? '' : String(row.maxValue),
+                              target: row.targetValue == null ? '' : String(row.targetValue),
+                              enabled: row.enabled,
+                            }
+
+                            return (
+                              <tr key={row.deviceTypeCode}>
+                                <td>{row.deviceTypeCode}</td>
+                                <td>{row.readingDisplay}</td>
+                                <td>{row.unit}</td>
+                                <td>
+                                  <input
+                                    className="threshold-input"
+                                    type="number"
+                                    value={draft.min}
+                                    onChange={(event) => handleThresholdDraftChange(row.deviceTypeCode, 'min', event.target.value)}
+                                    disabled={!canEditRoomThresholds || isSavingThreshold}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="threshold-input"
+                                    type="number"
+                                    value={draft.target}
+                                    onChange={(event) => handleThresholdDraftChange(row.deviceTypeCode, 'target', event.target.value)}
+                                    disabled={!canEditRoomThresholds || isSavingThreshold}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="threshold-input"
+                                    type="number"
+                                    value={draft.max}
+                                    onChange={(event) => handleThresholdDraftChange(row.deviceTypeCode, 'max', event.target.value)}
+                                    disabled={!canEditRoomThresholds || isSavingThreshold}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={draft.enabled}
+                                    onChange={(event) => handleThresholdDraftChange(row.deviceTypeCode, 'enabled', event.target.checked)}
+                                    disabled={!canEditRoomThresholds || isSavingThreshold}
+                                  />
+                                </td>
+                                <td>{row.source}</td>
+                                <td>
+                                  <div className="row-actions threshold-row-actions">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleSaveRoomThreshold(row.deviceTypeCode)}
+                                      disabled={!canEditRoomThresholds || isSavingThreshold}
+                                    >
+                                      Save Room
+                                    </button>
+                                    {!isScopedClassroomDashboard && (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleSaveGlobalThreshold(row.deviceTypeCode)}
+                                        disabled={!canManageThresholds || isSavingThreshold}
+                                      >
+                                        Save Global
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
-                  ) : (
-                    <p className="muted">No active session available for the selected classroom.</p>
                   )}
                 </section>
+              ) : null}
+              <section className="panel student-list-panel">
+                <div className="section-title-row">
+                  <h3>Student List</h3>
+                  <div className="row-actions row-actions--horizontal">
+                    {attendanceReport && (
+                      <div className="student-kpi-grid">
+                        <article className="stat-card tone-neutral">
+                          <div className="admin-metric-stack">
+                            <span>Enrolled</span>
+                            <strong>{attendanceReport.totals.enrolled}</strong>
+                          </div>
+                        </article>
+                        <article className="stat-card tone-safe">
+                          <div className="admin-metric-stack">
+                            <span>Present</span>
+                            <strong>{attendanceReport.totals.present}</strong>
+                          </div>
+                        </article>
+                        <article className="stat-card tone-warn">
+                          <div className="admin-metric-stack">
+                            <span>Late</span>
+                            <strong>{attendanceReport.totals.late}</strong>
+                          </div>
+                        </article>
+                        <article className="stat-card tone-danger">
+                          <div className="admin-metric-stack">
+                            <span>Absent</span>
+                            <strong>{attendanceReport.totals.absent}</strong>
+                          </div>
+                        </article>
 
-                <section className="panel">
-                  <div className="section-title-row">
-                    <h2>2D Classroom Device View</h2>
-                    <span>{selectedRoom?.room_code ?? 'Select room'}</span>
-                  </div>
+                        {selectedSession?.mode === 'NORMAL' && (() => {
+                          const scores = attendanceReport.students
+                            .map((s) => s.performance_score)
+                            .filter((s): s is number => s !== null)
+                          const avg = scores.length > 0
+                            ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+                            : null
+                          return avg !== null ? (
+                            <article className="stat-card tone-safe">
+                              <div className="admin-metric-stack">
+                                <span>Avg Score</span>
+                                <strong>{avg}</strong>
+                              </div>
+                            </article>
+                          ) : null
+                        })()}
 
-                  <div className="classroom-canvas">
-                    <div className="classroom-board">Board</div>
-                    {classroomLayoutDevices.map((device) => {
-                      const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
-                      return (
-                        <button
-                          key={device.device_id}
-                          type="button"
-                          className={`classroom-device ${isOn ? 'on' : 'off'}`}
-                          style={{ left: `${device.left}%`, top: `${device.top}%` }}
-                          onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
-                          disabled={!canToggleDevices}
-                          title={`${device.device_type} - ${device.location}`}
-                        >
-                          <span>{device.device_type}</span>
-                          <strong>{device.device_id}</strong>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </section>
-
-                <section className="panel device-crud-container">
-
-              <div className="section-title-row">
-                <h2>Device CRUD (Below 2D View)</h2>
-                <span>{filteredDevices.length} / {mergedDevices.length} devices</span>
-              </div>
-
-              <div className="device-crud-switcher row-actions">
-                <button
-                  type="button"
-                  className={deviceCrudPanelView === 'FILTER' ? 'active-toggle' : ''}
-                  onClick={() => setDeviceCrudPanelView('FILTER')}
-                >
-                  Search & Filter Panel
-                </button>
-                <button
-                  type="button"
-                  className={deviceCrudPanelView === 'CRUD' ? 'active-toggle' : ''}
-                  onClick={() => setDeviceCrudPanelView('CRUD')}
-                >
-                  CRUD Activities Panel
-                </button>
-              </div>
-
-              {deviceCrudPanelView === 'FILTER' ? (
-                <article className="panel device-subpanel">
-                  <div className="section-title-row">
-                    <h3>Search & Filter Panel</h3>
-                    <span>{filteredDevices.length} matched</span>
-                  </div>
-                  <div className="inline-filters device-filter-panel">
-                    <input
-                      value={deviceSearch}
-                      onChange={(event) => setDeviceSearch(event.target.value)}
-                      placeholder="Search by id, type, location, status, watts"
-                    />
-                    <select value={deviceTypeFilter} onChange={(event) => setDeviceTypeFilter(event.target.value)}>
-                      {deviceTypeOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                    <select value={deviceLocationFilter} onChange={(event) => setDeviceLocationFilter(event.target.value)}>
-                      <option value="ALL">ALL LOCATION AXES</option>
-                      <option value="FRONT">FRONT</option>
-                      <option value="BACK">BACK</option>
-                      <option value="LEFT">LEFT</option>
-                      <option value="RIGHT">RIGHT</option>
-                    </select>
-                  </div>
-                </article>
-              ) : (
-                <article className="panel device-subpanel">
-                  <div className="section-title-row">
-                    <h3>CRUD Activities Panel</h3>
-                    <span>{targetCrudRoom ? targetCrudRoom.room_code : 'Select room'}</span>
-                  </div>
-
-                  {createDeviceMessage && (
-                    <div className={`message-banner ${createDeviceMessage.type}`}>
-                      {createDeviceMessage.text}
-                    </div>
-                  )}
-
-                  <div className="device-create-grid">
-                    <select
-                      value={newDevice.device_type}
-                      onChange={(event) => setNewDevice((prev) => ({ ...prev, device_type: event.target.value }))}
+                        {selectedSession?.mode === 'TESTING' && (() => {
+                          const flagged = attendanceReport.students.filter((s) => s.risk_level !== null).length
+                          return (
+                            <article className="stat-card tone-danger">
+                              <div className="admin-metric-stack">
+                                <span>Flagged</span>
+                                <strong>{flagged}</strong>
+                              </div>
+                            </article>
+                          )
+                        })()}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="header-nav-link btn-capture-styled"
+                      onClick={() => {
+                        if (selectedSession) {
+                          navigate(`/sessions/${selectedSession.id}/capture`)
+                        }
+                      }}
+                      disabled={!selectedSession}
                     >
-                      <option value="LIGHT">LIGHT</option>
-                      <option value="AC">AC</option>
-                      <option value="FAN">FAN</option>
-                      <option value="CAMERA">CAMERA</option>
-                    </select>
-                    <select
-                      value={newDevice.location_front_back}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({
-                          ...prev,
-                          location_front_back: event.target.value as 'FRONT' | 'BACK',
-                        }))
-                      }
-                    >
-                      <option value="FRONT">FRONT</option>
-                      <option value="BACK">BACK</option>
-                    </select>
-                    <select
-                      value={newDevice.location_left_right}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({
-                          ...prev,
-                          location_left_right: event.target.value as 'LEFT' | 'RIGHT',
-                        }))
-                      }
-                    >
-                      <option value="LEFT">LEFT</option>
-                      <option value="RIGHT">RIGHT</option>
-                    </select>
-                    <input
-                      type="number"
-                      min={0}
-                      value={newDevice.power_consumption_watts ?? 0}
-                      onChange={(event) =>
-                        setNewDevice((prev) => ({ ...prev, power_consumption_watts: Number(event.target.value) }))
-                      }
-                      placeholder="Power (W)"
-                    />
-                    <button 
-                      type="button" 
-                      onClick={() => void handleAddDevice()} 
-                      disabled={!targetCrudRoom || !canManageDevices || isAddingDevice}
-                      className={isAddingDevice ? 'loading' : ''}
-                    >
-                      {isAddingDevice ? 'Creating...' : 'Create Device'}
+                      <Camera size={14} /> Open Camera Capture
                     </button>
+                  </div>
+                </div>
+
+                {!selectedSessionId ? (
+                  <p className="muted">Select a current session to view student attendance status.</p>
+                ) : attendanceReport ? (
+                  <div className="table-scroll">
+                    <table className="student-list-table student-list-table--rich">
+                      <thead>
+                        <tr>
+                          <th>Student</th>
+                          <th>Class</th>
+                          <th>Status</th>
+                          <th>Check-in</th>
+                          <th>Confidence</th>
+                          {selectedSession?.mode === 'NORMAL' ? (
+                            <>
+                              <th>Perf. Score</th>
+                              <th>Top Behaviors</th>
+                              <th>Negative Flags</th>
+                            </>
+                          ) : (
+                            <>
+                              <th>Risk Level</th>
+                              <th>Risk Flags</th>
+                              <th>Reviewed</th>
+                            </>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {attendanceReport.students.map((student) => {
+                          const isLearning = selectedSession?.mode === 'NORMAL'
+
+                          const NEGATIVE_BEHAVIORS = new Set([
+                            'yawning',
+                            'bow-head',
+                            'using-phone',
+                            'using-computer',
+                            'talking',
+                            'leaning-on-desk',
+                          ])
+                          const behaviorEntries = student.behavior_summary
+                            ? Object.entries(student.behavior_summary).sort(([, a], [, b]) => b - a)
+                            : []
+                          const topPositive = behaviorEntries
+                            .filter(([k]) => !NEGATIVE_BEHAVIORS.has(k))
+                            .slice(0, 3)
+                          const negativeCount = behaviorEntries
+                            .filter(([k]) => NEGATIVE_BEHAVIORS.has(k))
+                            .reduce((sum, [, v]) => sum + v, 0)
+
+                          const riskFlags = student.triggered_behaviors
+                            ? Object.entries(student.triggered_behaviors).filter(([, v]) => (v as number) > 0)
+                            : []
+
+                          const riskLevelClass = student.risk_level
+                            ? `risk-level-pill ${student.risk_level.toLowerCase()}`
+                            : ''
+
+                          return (
+                            <tr key={student.student_id}>
+                              <td>
+                                <div className="student-name-stack">
+                                  <strong>{student.student_name}</strong>
+                                  <span>{student.student_code}</span>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="student-class-badge">{student.student_class ?? '—'}</span>
+                              </td>
+                              <td>
+                                <span className={`student-status-pill ${student.status.toLowerCase()}`}>
+                                  {student.status}
+                                </span>
+                              </td>
+                              <td className="td-mono">
+                                {student.first_seen_at
+                                  ? new Date(student.first_seen_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                  : <span className="muted">—</span>}
+                              </td>
+                              <td className="td-mono">
+                                {student.confidence !== null
+                                  ? <span className="confidence-badge">{Math.round(student.confidence * 100)}%</span>
+                                  : <span className="muted">—</span>}
+                              </td>
+                              {isLearning ? (
+                                <>
+                                  <td>
+                                    {student.performance_score !== null ? (
+                                      <div className="perf-score-cell">
+                                        <div
+                                          className="perf-score-bar"
+                                          style={{ width: `${Math.min(100, Math.max(0, student.performance_score))}%` }}
+                                        />
+                                        <span>{student.performance_score}</span>
+                                      </div>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
+                                    {topPositive.length > 0 ? (
+                                      <div className="behavior-chips">
+                                        {topPositive.map(([k, v]) => (
+                                          <span key={k} className="behavior-chip positive" title={k}>
+                                            {k.replace(/-/g, ' ')} ×{v}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
+                                    {negativeCount > 0 ? (
+                                      <span className="behavior-chip negative">⚠ {negativeCount}</span>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                </>
+                              ) : (
+                                <>
+                                  <td>
+                                    {student.risk_level ? (
+                                      <span className={riskLevelClass}>{student.risk_level}</span>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
+                                    {riskFlags.length > 0 ? (
+                                      <div className="behavior-chips">
+                                        {riskFlags.map(([k, v]) => (
+                                          <span key={k} className="behavior-chip risk-flag" title={k}>
+                                            {k.replace(/_/g, ' ')} ×{v as number}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                  <td>
+                                    {student.incident_reviewed !== null ? (
+                                      <span className={`reviewed-badge ${student.incident_reviewed ? 'done' : 'pending'}`}>
+                                        {student.incident_reviewed ? '✓ Reviewed' : '⏳ Pending'}
+                                      </span>
+                                    ) : <span className="muted">—</span>}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted">Attendance report is not available for the selected session.</p>
+                )}
+              </section>
+        </>
+      ) : isOperationsDashboard ? (
+        <section className="panel">
+          <div className="section-title-row">
+            <div>
+              <h2>Device Operations Table</h2>
+              <span>{facilityDeviceGroups.length} rooms / {filteredDevices.length} devices</span>
+            </div>
+          </div>
+          <p className="muted">
+            Room filter: {selectedRoomId === 'ALL' ? 'All rooms in current building scope' : selectedRoom?.room_code ?? 'No room selected'}
+          </p>
+
+          {facilityDeviceGroups.length > 0 && (
+            <div className="facility-room-groups">
+              {facilityDeviceGroups.map((group) => (
+                <article key={group.room_id} className="room-device-group panel">
+                  <div className="section-title-row">
+                    <h3>Room {group.room_code}</h3>
+                    <span>{group.devices.length} devices</span>
                   </div>
 
                   <div className="table-scroll">
-                    <table className="ratio-table crud-ratio-table">
-                      <colgroup>
-                        <col className="col-device" />
-                        <col className="col-type" />
-                        <col className="col-location" />
-                        <col className="col-power" />
-                        <col className="col-status" />
-                        <col className="col-actions" />
-                      </colgroup>
+                    <table>
                       <thead>
                         <tr>
                           <th>Device</th>
                           <th>Type</th>
                           <th>Location</th>
-                          <th>Power (W)</th>
+                          {!canOnlyToggleDevices ? <th>Power (W)</th> : null}
                           <th>Status</th>
+                          {!canOnlyToggleDevices ? <th>Last Updated</th> : null}
                           <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredDevices.map((device) => {
+                        {group.devices.map((device) => {
                           const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
-                          const isEditing = editingDeviceId === device.device_id
+                          const isEditing = editingDeviceId === device.device_id && editingDeviceRoomId === device.room_id
+
                           return (
                             <tr key={device.device_id}>
-                              <td>{device.device_id}</td>
                               <td>{device.device_type} {device.device_index}</td>
+                              <td>{device.device_type}</td>
                               <td>
                                 {isEditing ? (
                                   <div className="inline-filters">
                                     <select
                                       value={editingDeviceFrontBack}
-                                      onChange={(event) =>
-                                        setEditingDeviceFrontBack(event.target.value as 'FRONT' | 'BACK')
-                                      }
+                                      onChange={(e) => setEditingDeviceFrontBack(e.target.value as 'FRONT' | 'BACK')}
                                     >
                                       <option value="FRONT">FRONT</option>
                                       <option value="BACK">BACK</option>
                                     </select>
                                     <select
                                       value={editingDeviceLeftRight}
-                                      onChange={(event) =>
-                                        setEditingDeviceLeftRight(event.target.value as 'LEFT' | 'RIGHT')
-                                      }
+                                      onChange={(e) => setEditingDeviceLeftRight(e.target.value as 'LEFT' | 'RIGHT')}
                                     >
                                       <option value="LEFT">LEFT</option>
                                       <option value="RIGHT">RIGHT</option>
@@ -1858,49 +2142,46 @@ export function BuildingDashboardPage(): JSX.Element {
                                   device.location
                                 )}
                               </td>
-                              <td>
-                                {device.power_consumption_watts ?? 0}
-                              </td>
+                              {!canOnlyToggleDevices && (
+                                <td>
+                                  {isEditing ? (
+                                    <input
+                                      type="number"
+                                      className="inline-input"
+                                      value={editingDevicePower}
+                                      onChange={(e) => setEditingDevicePower(e.target.value)}
+                                    />
+                                  ) : (
+                                    device.power_consumption_watts
+                                  )}
+                                </td>
+                              )}
                               <td>
                                 <button
                                   type="button"
                                   className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
-                                  onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
+                                  onClick={() => void handleToggleDevice(device)}
                                   disabled={!canToggleDevices}
-                                  title={canToggleDevices ? "Click to toggle status" : "View only"}
                                 >
                                   {isOn ? 'ON' : 'OFF'}
                                 </button>
                               </td>
+                              {!canOnlyToggleDevices && <td>{toLocalDateTime(device.last_updated)}</td>}
                               <td>
                                 <div className="row-actions">
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
-                                    disabled={!canToggleDevices}
-                                  >
-                                    Toggle
-                                  </button>
-                                  {isEditing ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleUpdateDevice(device.device_id, device.room_id)}
-                                      disabled={!canManageDevices}
-                                    >
-                                      Save
-                                    </button>
-                                  ) : (
-                                    <button type="button" onClick={() => openEditDevice(device)} disabled={!canManageDevices}>
-                                      Edit
-                                    </button>
+                                  {canManageDevices ? (
+                                    isEditing ? (
+                                      <>
+                                        <button onClick={() => void handleUpdateDevice(device.device_id, device.room_id)}>Save</button>
+                                        <button onClick={() => setEditingDeviceId('')}>Cancel</button>
+                                      </>
+                                    ) : (
+                                      <button onClick={() => openEditDevice(device)}>Edit</button>
+                                    )
+                                  ) : null}
+                                  {canManageDevices && (
+                                    <button onClick={() => void handleDeleteDevice(device.device_id, device.room_id)}>Delete</button>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleDeleteDevice(device.device_id, device.room_id)}
-                                    disabled={!canManageDevices}
-                                  >
-                                    Delete
-                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1910,358 +2191,286 @@ export function BuildingDashboardPage(): JSX.Element {
                     </table>
                   </div>
                 </article>
-              )}
-                </section>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : (
+        <>
+          <section className="panel">
+            <div className="section-title-row">
+              <div>
+                <h2>{isScopedClassroomDashboard ? "Session History" : "Current Active Sessions"}</h2>
+                <p className="muted small">Overview of performance and risk across available rooms.</p>
+              </div>
+              <div className="row-actions">
+                {!isScopedClassroomDashboard && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => navigate(`/buildings/${buildingIdParam}/sessions`)}
+                    title="View full sessions history"
+                  >
+                    <BarChart3 size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
 
-                <section className="panel device-threshold-container">
-                  <div className="section-title-row">
-                    <h2>Device Threshold Settings</h2>
-                    <span>Stakeholder controls (global + room)</span>
-                  </div>
+            <div className="table-scroll">
+              <table className="ratio-table sessions-ratio-table">
+                <colgroup>
+                  <col className="col-room" />
+                  <col className="col-mode" />
+                  <col className="col-status" />
+                  <col className="col-start" />
+                  <col className="col-risk" />
+                  <col className="col-detail" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Room</th>
+                    <th>Mode</th>
+                    <th>Status</th>
+                    <th>Start Time</th>
+                    <th>Risk Alerts</th>
+                    <th>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleSessions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center muted py-8">
+                        No active sessions found for this scope.
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleSessions.map((session) => (
+                      <tr
+                        key={session.id}
+                        className={`clickable-row ${session.id === selectedSessionId ? 'is-selected' : ''}`}
+                        onClick={() => handleSelectSession(session)}
+                      >
+                        <td>{session.room_code || '-'}</td>
+                        <td>{session.mode}</td>
+                        <td>
+                          <span className={`alp-status-badge alp-status-${session.status.toLowerCase()}`}>
+                            {session.status}
+                          </span>
+                        </td>
+                        <td>{toLocalDateTime(session.start_time)}</td>
+                        <td>
+                          <span className={`risk-tag risk-${toSeverity(session.final_risk_score || 0).toLowerCase()}`}>
+                            {session.risk_alerts_count} alerts
+                          </span>
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              className="btn-link"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handleSelectSession(session)
+                              }}
+                            >
+                              Details
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Device Type</th>
-                          <th>Reading</th>
-                          <th>Unit</th>
-                          <th>Min</th>
-                          <th>Max</th>
-                          <th>Target</th>
-                          <th>Enabled</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {deviceTypes.map((typeItem) => {
-                          const roomValue = roomThresholds.find((item) => item.device_type_code === typeItem.code)
-                          const globalValue = globalThresholds.find((item) => item.device_type_code === typeItem.code)
-                          const draft =
-                            thresholdDraft[typeItem.code] ??
-                            {
-                              min: roomValue?.min_value == null ? String(globalValue?.min_value ?? '') : String(roomValue.min_value),
-                              max: roomValue?.max_value == null ? String(globalValue?.max_value ?? '') : String(roomValue.max_value),
-                              target:
-                                roomValue?.target_value == null
-                                  ? String(globalValue?.target_value ?? '')
-                                  : String(roomValue.target_value),
-                              enabled: roomValue?.enabled ?? globalValue?.enabled ?? true,
-                            }
+          {shouldShowWorkspace && (
+            <div className="dashboard-grid">
+              {dashboardView === 'DEVICES' ? (
+                <>
+                  <section className="panel devices-panel">
+                    <div className="section-title-row">
+                      <h2>Room Environment</h2>
+                      <span>{filteredDevices.length} devices found</span>
+                    </div>
 
+                    <div className="device-crud-toolbar">
+                      <div className="search-box">
+                        <input
+                          type="text"
+                          placeholder="Search devices..."
+                          value={deviceSearch}
+                          onChange={(e) => setDeviceSearch(e.target.value)}
+                        />
+                      </div>
+                      <div className="filter-group-inline">
+                        <select value={deviceTypeFilter} onChange={(e) => setDeviceTypeFilter(e.target.value)}>
+                          {deviceTypeOptions.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="classroom-map-container">
+                      <div className="classroom-view-header">
+                        <span>Classroom Map View</span>
+                        <div className="sensor-summary">
+                          {Object.entries(sensorReadingByDeviceType).map(([type, val]) => (
+                            <div key={type} className="sensor-chip">
+                              <small>{type}:</small>
+                              <strong>{val}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="classroom-map">
+                        {classroomLayoutDevices.map((device) => {
+                          const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
                           return (
-                            <tr key={typeItem.code}>
-                              <td>{typeItem.display_name}</td>
-                              <td>{sensorReadingByDeviceType[typeItem.code as keyof typeof sensorReadingByDeviceType] ?? '-'}</td>
-                              <td>{typeItem.unit ?? '-'}</td>
-                              <td>
-                                <input
-                                  className="threshold-input"
-                                  type="number"
-                                  value={draft.min}
-                                  onChange={(event) =>
-                                    handleThresholdDraftChange(typeItem.code, 'min', event.target.value)
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="threshold-input"
-                                  type="number"
-                                  value={draft.max}
-                                  onChange={(event) =>
-                                    handleThresholdDraftChange(typeItem.code, 'max', event.target.value)
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  className="threshold-input"
-                                  type="number"
-                                  value={draft.target}
-                                  onChange={(event) =>
-                                    handleThresholdDraftChange(typeItem.code, 'target', event.target.value)
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  checked={draft.enabled}
-                                  onChange={(event) =>
-                                    handleThresholdDraftChange(typeItem.code, 'enabled', event.target.checked)
-                                  }
-                                />
-                              </td>
-                              <td>
-                                <div className="row-actions">
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleSaveRoomThreshold(typeItem.code)}
-                                    disabled={!selectedRoom || !canManageThresholds}
-                                  >
-                                    Save Room
-                                  </button>
-                                  <button type="button" onClick={() => void handleSaveGlobalThreshold(typeItem.code)} disabled={!canManageThresholds}>
-                                    Save Global
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
+                            <div
+                              key={device.device_id}
+                              className={`map-device-node node-${device.device_type.toLowerCase()} ${isOn ? 'is-on' : 'is-off'}`}
+                              style={{ left: `${device.left}%`, top: `${device.top}%` }}
+                              title={`${device.device_id}: ${device.status}`}
+                              onClick={() => void handleToggleDevice(device)}
+                            >
+                              <div className="node-icon">
+                                {device.device_type === 'LIGHT' ? <Monitor size={14} /> : <BarChart3 size={14} />}
+                              </div>
+                              <span className="node-label">{device.device_index}</span>
+                            </div>
                           )
                         })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                      </div>
+                    </div>
+                  </section>
 
-                <section className="panel">
-                  <div className="section-title-row">
-                    <h2>Mode Controls</h2>
-                    <span>{selectedSession?.mode ?? 'No session selected'}</span>
-                  </div>
-                  <div className="row-actions session-actions">
-                    {!isProctorDashboard ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setModeFilter('NORMAL')
-                            void handleSessionModeChange('NORMAL')
-                            setDashboardView('MODE')
-                          }}
-                          disabled={!selectedSessionId || !canSwitchLearningMode}
-                        >
-                          Activate Learning Mode Screen
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setModeFilter('TESTING')
-                            void handleSessionModeChange('TESTING')
-                            setDashboardView('MODE')
-                          }}
-                          disabled={!selectedSessionId || !canSwitchTestingMode}
-                        >
-                          Activate Testing Mode Screen
-                        </button>
-                      </>
-                    ) : (
-                      <p className="muted">Proctor dashboard is locked to testing mode.</p>
-                    )}
-                    <button type="button" onClick={() => void handleEndSession()} disabled={!selectedSessionId || !canEndSession}>
-                      End Session
-                    </button>
-                  </div>
-                </section>
-              </>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <section className="panel">
-              <div className="section-title-row">
-                <h2>Current Session Mode</h2>
-                <span>{modeFilter}</span>
-              </div>
-              <div className="row-actions session-actions">
-                <select
-                  value={modeFilter}
-                  onChange={(event) => {
-                    if (isProctorDashboard) return
-                    const nextMode = event.target.value as ModeFilter
-                    setModeFilter(nextMode)
-                    if (selectedSessionId) {
-                      void handleSessionModeChange(nextMode)
-                    }
-                  }}
-                  disabled={isProctorDashboard || !selectedSessionId || (!canSwitchLearningMode && !canSwitchTestingMode)}
-                >
-                  <option value="NORMAL">Learning Mode</option>
-                  <option value="TESTING">Testing Mode</option>
-                </select>
-              </div>
-              <p className="muted">
-                {modeFilter === 'TESTING'
-                  ? 'Testing mode: Incident feed, risk chart, and annotated frame preview only.'
-                  : 'Learning mode: Behavior distribution and student leaderboard only.'}
-              </p>
-            </section>
-
-            {modeFilter === 'TESTING' ? (
-              <>
-                <section className="content-grid-two">
-                  <article className="panel">
+                  <section className="panel dashboard-incidents-panel">
                     <div className="section-title-row">
-                      <h2>Incidents Feed</h2>
-                      <span>{filteredIncidents.length} incidents</span>
+                      <h2>Risk Monitoring</h2>
+                      <span className="badge">{filteredIncidents.length} logs</span>
                     </div>
 
-                    {!canViewIncidents ? (
-                      <p className="muted">You do not have permission to view incidents.</p>
-                    ) : (
-                      <>
-
-                        <div className="inline-filters">
-                          <select value={severityFilter} onChange={(event) => setSeverityFilter(event.target.value as SeverityFilter)}>
-                            <option value="ALL">All Severity</option>
-                            <option value="LOW">Low</option>
-                            <option value="MEDIUM">Medium</option>
-                            <option value="HIGH">High</option>
-                            <option value="CRITICAL">Critical</option>
-                          </select>
-                          <select value={incidentTypeFilter} onChange={(event) => setIncidentTypeFilter(event.target.value)}>
-                            {incidentTypeOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="incident-list">
-                          {filteredIncidents.map((incident) => {
-                            const note = reviewNotes[incident.id] ?? ''
-                            const severity = toSeverity(incident.risk_score)
-
-                            return (
-                              <article key={incident.id} className={`incident-item severity-${severity.toLowerCase()}`}>
-                                <header>
-                                  <strong>{severity}</strong>
-                                  <span>{timeAgo(incident.flagged_at)}</span>
-                                </header>
-                                <p>Student: {incident.student_id.slice(0, 8)}</p>
-                                <p>Risk score: {incident.risk_score.toFixed(2)}</p>
-                                <p>Behaviors: {Object.keys(incident.triggered_behaviors).join(', ') || 'N/A'}</p>
-
-                                {!incident.reviewed ? (
-                                  <>
-                                    <textarea
-                                      placeholder="Required note for acknowledge/dismiss"
-                                      value={note}
-                                      disabled={!canReviewIncidents}
-                                      onChange={(event) =>
-                                        setReviewNotes((prev) => ({ ...prev, [incident.id]: event.target.value }))
-                                      }
-                                    />
-                                    {canReviewIncidents ? (
-                                      <div className="row-actions">
-                                        <button type="button" onClick={() => void handleIncidentAction(incident.id, 'ACK')}>
-                                          Acknowledge
-                                        </button>
-                                        <button type="button" onClick={() => void handleIncidentAction(incident.id, 'DISMISS')}>
-                                          Dismiss
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <p className="muted">You do not have permission to review incidents.</p>
-                                    )}
-                                  </>
-                                ) : (
-                                  <p className="muted">Reviewed: {incident.reviewer_notes ?? 'No note'}</p>
-                                )}
-                              </article>
-                            )
-                          })}
-                        </div>
-                      </>
-                    )}
-                  </article>
-
-                  <article className="panel">
-                    <div className="section-title-row">
-                      <h2>Annotated Frame Preview</h2>
-                      <span>{latestFrame?.source ?? 'none'}</span>
-                    </div>
-
-                    {canViewFrames ? (
-                      latestFrame?.image_base64 ? (
-                        <img
-                          className="frame-preview"
-                          src={ensureDataUri(latestFrame.image_base64)}
-                          alt="Annotated classroom frame"
-                        />
+                    <div className="incident-list">
+                      {filteredIncidents.length === 0 ? (
+                        <div className="empty-state">No risk incidents detected in this session.</div>
                       ) : (
-                        <div className="frame-placeholder">
-                          <Camera size={20} />
-                          <p>No frame available yet for this session.</p>
-                        </div>
-                      )
-                    ) : (
-                      <p className="muted">You do not have permission to view annotated frames.</p>
-                    )}
-
-                    <p className="muted">Captured: {toLocalDateTime(latestFrame?.captured_at ?? null)}</p>
-                  </article>
-                </section>
-
-                <section className="panel chart-panel">
-                  <div className="section-title-row">
-                    <h2>Risk Over Time</h2>
-                    <BarChart3 size={16} />
-                  </div>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={riskChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis domain={[0, 1]} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="risk" stroke="#b32b24" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </section>
-              </>
-            ) : (
-              <>
-                <section className="panel chart-panel">
-                  <div className="section-title-row">
-                    <h2>Behavior Distribution</h2>
-                    <BarChart3 size={16} />
-                  </div>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={behaviorDistributionData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Bar dataKey="count" fill="#214b7a" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </section>
-
-                <section className="panel chart-panel">
-                  <div className="section-title-row">
-                    <h2>Student Leaderboard</h2>
-                    <div className="inline-filters">
-                      <button type="button" onClick={() => setLeaderboardMetric('RISK')}>
-                        Risk
-                      </button>
-                      <button type="button" onClick={() => setLeaderboardMetric('PERFORMANCE')}>
-                        Performance
-                      </button>
+                        filteredIncidents.map((incident) => (
+                          <article key={incident.id} className={`incident-card risk-${toSeverity(incident.risk_score).toLowerCase()}`}>
+                            <div className="ic-header">
+                              <span className="ic-actor">{incident.student_name || incident.student_id.slice(0, 8)}</span>
+                              <span className="ic-time">{timeAgo(incident.flagged_at)}</span>
+                            </div>
+                            <div className="ic-body">
+                              <div className="ic-behaviors">
+                                {Object.keys(incident.triggered_behaviors || {}).map((b) => (
+                                  <span key={b} className="behavior-tag">{b}</span>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="ic-footer">
+                              <span className="ic-score">Risk Score: {(incident.risk_score * 100).toFixed(0)}%</span>
+                              {incident.reviewed ? (
+                                <CheckCircle2 size={16} className="text-safe" />
+                              ) : (
+                                <button
+                                  className="btn-review"
+                                  onClick={() => void handleReviewIncident(incident.id)}
+                                >
+                                  Review
+                                </button>
+                              )}
+                            </div>
+                          </article>
+                        ))
+                      )}
                     </div>
-                  </div>
+                  </section>
+                </>
+              ) : (
+                <>
+                  <section className="panel dashboard-analytics-panel">
+                    <div className="section-title-row">
+                      <h2>Performance Analytics</h2>
+                      <span>Session Insight</span>
+                    </div>
 
-                  <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={leaderboardData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="actor" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar
-                        dataKey="value"
-                        name={leaderboardMetric === 'RISK' ? 'Risk Score' : 'Performance Activity'}
-                        fill="#4f6f52"
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </section>
-              </>
-            )}
-          </>
-        )}
-      </section>
-    </main>
+                    <div className="analytics-charts">
+                      <div className="chart-container">
+                        <h3>Risk Progression</h3>
+                        <ResponsiveContainer width="100%" height={240}>
+                          <LineChart data={riskChartData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <XAxis dataKey="time" stroke="#64748b" fontSize={10} />
+                            <YAxis stroke="#64748b" fontSize={10} domain={[0, 1]} />
+                            <Tooltip
+                              contentStyle={{ background: '#1e2232', border: 'none', borderRadius: '8px' }}
+                            />
+                            <Line type="monotone" dataKey="risk" stroke="#f87171" strokeWidth={2} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      <div className="chart-container">
+                        <h3>Behavior Distribution</h3>
+                        <ResponsiveContainer width="100%" height={240}>
+                          <BarChart data={behaviorDistributionData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                            <XAxis dataKey="name" stroke="#64748b" fontSize={10} />
+                            <YAxis stroke="#64748b" fontSize={10} />
+                            <Tooltip
+                              contentStyle={{ background: '#1e2232', border: 'none', borderRadius: '8px' }}
+                            />
+                            <Bar dataKey="count" fill="#818cf8" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="panel leaderboard-panel">
+                    <div className="section-title-row">
+                      <h2>Student Activity</h2>
+                      <div className="tab-buttons">
+                        <button
+                          className={leaderboardMetric === 'RISK' ? 'is-active' : ''}
+                          onClick={() => setLeaderboardMetric('RISK')}
+                        >
+                          Risk
+                        </button>
+                        <button
+                          className={leaderboardMetric === 'PERFORMANCE' ? 'is-active' : ''}
+                          onClick={() => setLeaderboardMetric('PERFORMANCE')}
+                        >
+                          Activity
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="leaderboard-list">
+                      {leaderboardData.map((item) => (
+                        <div key={item.actor} className="leaderboard-item">
+                          <span className="li-name">{item.actor}</span>
+                          <div className="li-bar-container">
+                            <div
+                              className={`li-bar ${leaderboardMetric === 'RISK' ? 'bg-danger' : 'bg-primary'}`}
+                              style={{ width: `${Math.min(100, item.value * (leaderboardMetric === 'RISK' ? 100 : 5))}%` }}
+                            />
+                          </div>
+                          <span className="li-value">{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </AdminBuildingLayout>
   )
 }

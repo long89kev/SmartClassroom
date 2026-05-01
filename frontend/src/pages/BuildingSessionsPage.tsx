@@ -1394,23 +1394,32 @@ export function BuildingSessionsPage(): JSX.Element {
               <h3>Student List</h3>
               <div className="row-actions row-actions--horizontal">
                 {attendanceReport && (
-                  <div className="student-kpi-bar student-kpi-bar--compact">
-                    <div className="student-kpi-tile">
-                      <span>Enrolled</span>
-                      <strong>{attendanceReport.totals.enrolled}</strong>
-                    </div>
-                    <div className="student-kpi-tile present">
-                      <span>Present</span>
-                      <strong>{attendanceReport.totals.present}</strong>
-                    </div>
-                    <div className="student-kpi-tile late">
-                      <span>Late</span>
-                      <strong>{attendanceReport.totals.late}</strong>
-                    </div>
-                    <div className="student-kpi-tile absent">
-                      <span>Absent</span>
-                      <strong>{attendanceReport.totals.absent}</strong>
-                    </div>
+                  <div className="student-kpi-grid">
+                    <article className="stat-card tone-neutral">
+                      <div className="admin-metric-stack">
+                        <span>Enrolled</span>
+                        <strong>{attendanceReport.totals.enrolled}</strong>
+                      </div>
+                    </article>
+                    <article className="stat-card tone-safe">
+                      <div className="admin-metric-stack">
+                        <span>Present</span>
+                        <strong>{attendanceReport.totals.present}</strong>
+                      </div>
+                    </article>
+                    <article className="stat-card tone-warn">
+                      <div className="admin-metric-stack">
+                        <span>Late</span>
+                        <strong>{attendanceReport.totals.late}</strong>
+                      </div>
+                    </article>
+                    <article className="stat-card tone-danger">
+                      <div className="admin-metric-stack">
+                        <span>Absent</span>
+                        <strong>{attendanceReport.totals.absent}</strong>
+                      </div>
+                    </article>
+
                     {selectedSession?.mode === 'NORMAL' && (() => {
                       const scores = attendanceReport.students
                         .map(s => s.performance_score)
@@ -1419,19 +1428,24 @@ export function BuildingSessionsPage(): JSX.Element {
                         ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
                         : null
                       return avg !== null ? (
-                        <div className="student-kpi-tile perf">
-                          <span>Avg Score</span>
-                          <strong>{avg}</strong>
-                        </div>
+                        <article className="stat-card tone-safe">
+                          <div className="admin-metric-stack">
+                            <span>Avg Score</span>
+                            <strong>{avg}</strong>
+                          </div>
+                        </article>
                       ) : null
                     })()}
+
                     {selectedSession?.mode === 'TESTING' && (() => {
                       const flagged = attendanceReport.students.filter(s => s.risk_level !== null).length
                       return (
-                        <div className="student-kpi-tile risk">
-                          <span>Flagged</span>
-                          <strong>{flagged}</strong>
-                        </div>
+                        <article className="stat-card tone-danger">
+                          <div className="admin-metric-stack">
+                            <span>Flagged</span>
+                            <strong>{flagged}</strong>
+                          </div>
+                        </article>
                       )
                     })()}
                   </div>

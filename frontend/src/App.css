@@ -2546,3 +2546,215 @@ textarea {
     height: 640px;
   }
 }
+
+/* Instructor Dashboard & Admin Sessions Alignment */
+
+.student-kpi-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  width: auto;
+  align-items: center;
+}
+
+.student-kpi-grid .stat-card {
+  height: 42px;
+  min-width: unset;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.student-kpi-grid .admin-metric-stack {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.student-kpi-grid .admin-metric-stack span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.student-kpi-grid .admin-metric-stack strong {
+  font-size: 18px;
+}
+
+.admin-side-context-box {
+  background: rgba(34, 122, 64, 0.04);
+  border: 1px solid rgba(34, 122, 64, 0.1);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 4px;
+}
+
+.admin-side-context-box p {
+  margin-bottom: 4px;
+}
+
+.admin-side-context-box p:last-child {
+  margin-bottom: 0;
+}
+
+.admin-sidebar-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 8px 0;
+  opacity: 0.5;
+}
+
+.admin-side-section {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-side-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-side-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-side-item:hover {
+  border-color: var(--brand);
+  background: var(--paper-strong);
+  transform: translateX(4px);
+}
+
+.admin-side-item.is-active {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 4px 12px rgba(34, 122, 64, 0.1);
+}
+
+.asi-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.asi-header strong {
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.asi-time {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.asi-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.admin-side-form {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.admin-btn-primary {
+  width: 100%;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.admin-btn-primary:hover {
+  background: #1b6334;
+}
+
+.admin-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-side-footer-info {
+  padding: 0 4px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-soft);
+  color: var(--brand);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.risk-tag {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.risk-low { background: #ecfdf5; color: #059669; }
+.risk-medium { background: #fffbeb; color: #d97706; }
+.risk-high { background: #fef2f2; color: #dc2626; }
+.risk-critical { background: #7f1d1d; color: #fff; }
+
+.alp-status-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.alp-status-active { background: #dcfce7; color: #166534; }
+.alp-status-ended { background: #f1f5f9; color: #475569; }
+.alp-status-scheduled { background: #eff6ff; color: #1e40af; }
+
+.clickable-row.is-selected {
+  background: var(--brand-soft) !important;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--brand);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.btn-link:hover {
+  color: #1b6334;
+}
