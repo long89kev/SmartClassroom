@@ -1382,17 +1382,9 @@ async def end_session(
 @router.get("/rooms/{room_id}/sessions/active")
 async def get_active_sessions(
     room_id: UUID,
-    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all active sessions in a room"""
-    _ensure_session_permissions(
-        current_user,
-        db,
-        {"dashboard:view_classroom", "dashboard:view_block", "dashboard:view_university", "dashboard:view_minimal"},
-    )
-    _ensure_room_scope(current_user, room_id, db)
-
+    """Get all active sessions in a room (public for internal service access)."""
     sessions = db.query(ClassSession).filter(
         ClassSession.room_id == room_id,
         ClassSession.status == "ACTIVE"
