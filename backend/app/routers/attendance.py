@@ -29,7 +29,7 @@ from app.models import (
     Student,
     User,
 )
-from app.routers.auth import get_current_user, get_user_room_scope
+from app.routers.auth import get_current_user, get_user_room_scope, is_superuser
 from app.schemas.common import (
     AttendanceConfigUpsert,
     AttendanceDailyRoomSummary,
@@ -133,17 +133,21 @@ async def get_attendance_stream_video_feed(current_user: User = Depends(get_curr
 
 
 def _ensure_attendance_role(current_user: User) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER"}:
         raise HTTPException(status_code=403, detail="Only INSTRUCTOR or ACADEMIC_MANAGER can access attendance APIs")
 
 
 def _ensure_attendance_dashboard_role(current_user: User) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role not in {"ACADEMIC_MANAGER", "ACADEMIC_MANAGER", "FACILITY_STAFF", "INSTRUCTOR"}:
         raise HTTPException(status_code=403, detail="Insufficient role for school-wide attendance dashboard")
 
 
 def _ensure_attendance_scope(current_user: User, room_id: UUID, db: Session) -> None:
-    if current_user.role == "ACADEMIC_MANAGER":
+    if is_superuser(current_user) or current_user.role == "ACADEMIC_MANAGER":
         return
 
     allowed_rooms = set(get_user_room_scope(current_user, db))

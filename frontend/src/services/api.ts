@@ -43,6 +43,8 @@ import type {
   LearningModeResponse,
   TestingModeResponse,
   BehaviorLogListResponse,
+  TempFrameResponse,
+  TempOutputFrameResponse,
 } from '../types'
 
 export const api = axios.create({
@@ -248,6 +250,21 @@ export async function getLatestSessionFrame(sessionId: string): Promise<LatestFr
   return data
 }
 
+export async function getTempFrame(
+  sessionId: string,
+  params?: {
+    index?: number
+    sort?: 'name' | 'mtime'
+  },
+): Promise<TempFrameResponse> {
+  try {
+    const { data } = await api.get<TempFrameResponse>(`/sessions/${sessionId}/temp-frame`, { params })
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
+}
+
 export async function getIncidents(params?: { room_id?: string; session_id?: string; reviewed?: boolean }): Promise<Incident[]> {
   const { data } = await api.get<Incident[]>('/incidents', { params })
   return data
@@ -435,6 +452,7 @@ export async function ingestLearningMode(
     image_base64: string
     student_id?: string
     confidence_threshold?: number
+    source_filename?: string
   },
 ): Promise<LearningModeResponse> {
   const { data } = await api.post<LearningModeResponse>(`/sessions/${sessionId}/learn`, payload)
@@ -447,6 +465,7 @@ export async function ingestTestingMode(
     image_base64: string
     students_present?: string[]
     confidence_threshold?: number
+    source_filename?: string
   },
 ): Promise<TestingModeResponse> {
   const { data } = await api.post<TestingModeResponse>(`/sessions/${sessionId}/test`, payload)
@@ -464,4 +483,99 @@ export async function getBehaviorLogs(
 ): Promise<BehaviorLogListResponse> {
   const { data } = await api.get<BehaviorLogListResponse>(`/sessions/${sessionId}/behavior-logs`, { params: filters })
   return data
+}
+
+export interface RoomHierarchy {
+  building: { id: string; name: string; code: string | null }
+  floor: { id: string; number: number; name: string | null }
+  room: { id: string; code: string; name: string | null; capacity: number }
+}
+
+export async function getRoomHierarchy(roomId: string): Promise<RoomHierarchy> {
+  const { data } = await api.get<RoomHierarchy>(`/rooms/${roomId}/hierarchy`)
+  return data
+}
+
+export async function getTempOutputFrame(
+  sessionId: string,
+  params?: {
+    index?: number
+    sort?: 'name' | 'mtime'
+  },
+): Promise<TempOutputFrameResponse> {
+  try {
+    const { data } = await api.get<TempOutputFrameResponse>(`/sessions/${sessionId}/temp-output-frame`, { params })
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
+}
+
+export interface TempBatchInferenceResult {
+  filename: string
+  detection_count: number
+  saved_output_path: string | null
+}
+
+export interface TempBatchInferenceResponse {
+  total_input: number
+  processed: number
+  errors: number
+  results: TempBatchInferenceResult[]
+  error_details: { filename: string; error: string }[]
+  last_annotated_image_base64: string | null
+  mode: string
+}
+
+export async function runTempBatchInference(
+  sessionId: string,
+  params?: {
+    mode?: 'LEARNING' | 'TESTING'
+    confidence_threshold?: number
+  },
+): Promise<TempBatchInferenceResponse> {
+  try {
+    const { data } = await api.post<TempBatchInferenceResponse>(
+      `/sessions/${sessionId}/temp-batch-inference`,
+      null,
+      { params },
+    )
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
+}
+
+export interface UploadAnalyzeResponse {
+  annotated_image_base64: string | null
+  detections: any[]
+  logs_created: number
+}
+
+export async function uploadAndAnalyzeImage(
+  sessionId: string,
+  file: File,
+  params?: {
+    mode?: 'LEARNING' | 'TESTING'
+    confidence_threshold?: number
+  },
+): Promise<UploadAnalyzeResponse> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    const { data } = await api.post<UploadAnalyzeResponse>(
+      `/sessions/${sessionId}/upload-analyze`,
+      formData,
+      {
+        params,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      },
+    )
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
 }

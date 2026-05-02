@@ -20,8 +20,11 @@ export function useFrameUpload(
   sessionId: string | null,
   intervalMs: number | null,
   session: SessionSummary | null,
-  captureFrame: () => string | null,
+  captureFrame: () => string | null | Promise<string | null>,
   confidenceThreshold: number = 0.5,
+  inferenceMode: 'LEARNING' | 'TESTING' | null = null,
+  stopOnCaptureFailure: boolean = false,
+  getSourceFilename?: () => string | null,
 ): UseFrameUploadReturn {
   const [state, setState] = useState<UseFrameUploadState>({
     isUploading: false,
@@ -43,13 +46,31 @@ export function useFrameUpload(
 
     inFlightRef.current = true
 
+    const resolvedMode = inferenceMode ?? (session.mode === 'TESTING' ? 'TESTING' : 'LEARNING')
+
+    const stopIfConfigured = () => {
+      if (!stopOnCaptureFailure) return
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+
+      isRunningRef.current = false
+
+      setState((prev) => ({
+        ...prev,
+        isUploading: false,
+      }))
+    }
+
     try {
-      const dataUri = captureFrame()
+      const dataUri = await Promise.resolve(captureFrame())
       if (!dataUri) {
         setState((prev) => ({
           ...prev,
           lastError: 'Failed to capture frame',
         }))
+        stopIfConfigured()
         inFlightRef.current = false
         return
       }
@@ -57,17 +78,21 @@ export function useFrameUpload(
       // Choose endpoint based on session mode
       let response: LearningModeResponse | TestingModeResponse
 
-      if (session.mode === 'TESTING') {
+      const sourceFilename = getSourceFilename?.() ?? undefined
+
+      if (resolvedMode === 'TESTING') {
         response = await ingestTestingMode(sessionId, {
           image_base64: dataUri,
           students_present: session.students_present,
           confidence_threshold: confidenceThreshold,
+          source_filename: sourceFilename,
         })
       } else {
         // NORMAL mode (learning)
         response = await ingestLearningMode(sessionId, {
           image_base64: dataUri,
           confidence_threshold: confidenceThreshold,
+          source_filename: sourceFilename,
         })
       }
 
@@ -88,10 +113,11 @@ export function useFrameUpload(
         ...prev,
         lastError: errorMsg,
       }))
+      stopIfConfigured()
     } finally {
       inFlightRef.current = false
     }
-  }, [sessionId, session, intervalMs, captureFrame, confidenceThreshold])
+  }, [sessionId, session, intervalMs, captureFrame, confidenceThreshold, inferenceMode, stopOnCaptureFailure, getSourceFilename])
 
   const scheduleNextUpload = useCallback((): void => {
     if (!mountedRef.current || !intervalMs) return

@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     yolo_model_version: str = "v8"
     yolo_weights_path: str = "backend/models/yolo_weights/"
     yolo_confidence_threshold: float = 0.5
+
+    # Temp replay frames (dev only)
+    temp_frames_dir: str = "backend/app/services/Temp"
+    temp_frames_enabled: bool = True
+    temp_output_dir: str = "backend/app/services/Temp_output"
     
     # MQTT (Mosquitto Broker in Docker)
     mqtt_broker_host: str = "localhost"

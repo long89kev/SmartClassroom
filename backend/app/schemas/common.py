@@ -92,12 +92,14 @@ class LearningModeIngest(BaseModel):
     image_base64: str  # Base64 encoded image or data URI
     student_id: Optional[UUID] = None
     confidence_threshold: float = 0.5
+    source_filename: Optional[str] = None  # Original Temp replay filename for output persistence
 
 class TestingModeIngest(BaseModel):
     """Testing mode accepts image for cheat detection + risk scoring"""
     image_base64: str  # Base64 encoded image with student faces
     students_present: List[UUID] = Field(default_factory=list)
     confidence_threshold: float = 0.5
+    source_filename: Optional[str] = None  # Original Temp replay filename for output persistence
 
 class BehaviorDetectionResponse(BaseModel):
     """Response from behavior detection (learning or testing)"""
@@ -162,6 +164,26 @@ class BehaviorLogListResponse(BaseModel):
     offset: int
     limit: int
     logs: List[BehaviorLogResponse]
+
+
+class TempFrameResponse(BaseModel):
+    """Temp replay frame response (dev only)."""
+    index: int
+    total: int
+    filename: str
+    image_base64: str
+    has_next: bool
+    next_index: Optional[int] = None
+
+
+class TempOutputFrameResponse(BaseModel):
+    """Annotated output frame from Temp_output directory."""
+    index: int
+    total: int
+    filename: str
+    image_base64: str
+    has_next: bool
+    next_index: Optional[int] = None
 
 
 class AttendanceConfigUpsert(BaseModel):
@@ -516,7 +538,206 @@ class TokenResponse(BaseModel):
 # ERROR SCHEMAS
 # =============================================================================
 
+class StudentAttendanceSummary(BaseModel):
+    present: int
+    late: int
+    absent: int
+    total_sessions: int
+
+
+class StudentBehaviorSummaryItem(BaseModel):
+    behavior_class: str
+    count: int
+    duration_seconds: int
+    avg_confidence: float
+
+
+class StudentIncidentItem(BaseModel):
+    id: UUID
+    risk_score: float
+    risk_level: str
+    triggered_behaviors: Dict[str, Any]
+    flagged_at: datetime
+    reviewed: bool
+    reviewer_notes: Optional[str] = None
+
+
+class StudentSessionDetailResponse(BaseModel):
+    session_id: UUID
+    subject_name: Optional[str] = None
+    room_code: Optional[str] = None
+    teacher_name: Optional[str] = None
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    attendance_status: Literal["PRESENT", "LATE", "ABSENT"]
+    first_seen_at: Optional[datetime] = None
+    confidence: Optional[float] = None
+    grace_minutes: int
+    behavior_summary: List[StudentBehaviorSummaryItem] = Field(default_factory=list)
+    incidents: List[StudentIncidentItem] = Field(default_factory=list)
+
+# =============================================================================
+# INCIDENT & RISK SCHEMAS
+# =============================================================================
+
+class IncidentCreate(BaseModel):
+    session_id: UUID
+    student_id: UUID
+    risk_score: float
+    triggered_behaviors: dict
+
+class IncidentReview(BaseModel):
+    reviewer_notes: str
+
+class IncidentResponse(BaseModel):
+    id: UUID
+    session_id: UUID
+    student_id: UUID
+    risk_score: float
+    risk_level: str
+    triggered_behaviors: dict
+    flagged_at: datetime
+    reviewed: bool
+    reviewer_notes: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+# =============================================================================
+# IOT RULE SCHEMAS
+# =============================================================================
+
+class IoTRuleBase(BaseModel):
+    rule_name: str
+    scope_type: Literal["GLOBAL", "BUILDING", "ROOM"]
+    building_id: Optional[UUID] = None
+    room_id: Optional[UUID] = None
+    condition_type: str
+    condition_params: dict
+    actions: list
+    priority: int = 0
+
+class IoTRuleCreate(IoTRuleBase):
+    pass
+
+class IoTRuleUpdate(BaseModel):
+    rule_name: Optional[str] = None
+    scope_type: Optional[Literal["GLOBAL", "BUILDING", "ROOM"]] = None
+    building_id: Optional[UUID] = None
+    room_id: Optional[UUID] = None
+    condition_params: Optional[dict] = None
+    actions: Optional[list] = None
+    is_active: Optional[bool] = None
+    priority: Optional[int] = None
+
+class IoTRuleResponse(IoTRuleBase):
+    id: UUID
+    is_active: bool
+    created_at: datetime
+    last_triggered: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
+# =============================================================================
+# DEVICE SCHEMAS
+# =============================================================================
+
+class DeviceCreateUpdate(BaseModel):
+    device_id: Optional[str] = None
+    device_type: str
+    location_front_back: Literal["FRONT", "BACK"]
+    location_left_right: Literal["LEFT", "RIGHT"]
+    location: Optional[str] = None
+    power_consumption_watts: Optional[int] = None
+
+class DeviceToggle(BaseModel):
+    action: str  # ON or OFF
+    duration_minutes: Optional[int] = None  # For temporary overrides
+
+class DeviceStateResponse(BaseModel):
+    device_id: str
+    device_type: str
+    status: str
+    manual_override: bool
+    last_updated: datetime
+    
+    class Config:
+        from_attributes = True
+
+class DeviceTypeResponse(BaseModel):
+    code: str
+    display_name: str
+    unit: Optional[str] = None
+    default_min: Optional[float] = None
+    default_max: Optional[float] = None
+    default_target: Optional[float] = None
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+class ThresholdUpdatePayload(BaseModel):
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    target_value: Optional[float] = None
+    enabled: Optional[bool] = True
+
+class GlobalThresholdResponse(BaseModel):
+    device_type_code: str
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    target_value: Optional[float] = None
+    enabled: bool
+
+class RoomThresholdResponse(BaseModel):
+    room_id: UUID
+    device_type_code: str
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    target_value: Optional[float] = None
+    enabled: bool
+    is_override: bool
+
+# =============================================================================
+# AUTH SCHEMAS
+# =============================================================================
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserRegister(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+    role: Optional[str] = "STUDENT"
+
+class UserResponse(BaseModel):
+    id: UUID
+    username: str
+    email: Optional[str]
+    role: str
+    is_active: bool
+    
+    class Config:
+        from_attributes = True
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+# =============================================================================
+# ERROR SCHEMAS
+# =============================================================================
+
 class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
     status_code: int
+ 
+class UploadAnalyzeResponse(BaseModel):
+    annotated_image_base64: Optional[str] = None
+    detections: List[Dict[str, Any]] = []
+    logs_created: int = 0

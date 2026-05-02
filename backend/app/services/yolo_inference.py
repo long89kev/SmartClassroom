@@ -197,38 +197,28 @@ class YOLOInferenceService:
             )
             return None
 
+        logger.info("Loading model %s from %s", spec["model_key"], model_path)
+
+        # ---------- Try legacy YOLOv7 loader FIRST ----------
+        # Our SCB-Dataset weights are YOLOv7 checkpoints. Loading them via
+        # Ultralytics first wastes memory (each ~75 MB) because Ultralytics
+        # unpickles the model then we reject it and load again via legacy.
+        # Going legacy-first avoids the double-load.
         try:
-            from ultralytics import YOLO
+            import sys
+            import importlib
 
-            model = YOLO(str(model_path))
+            # Ensure the models package is importable (needed for torch.load
+            # to reconstruct pickle references like models.yolo.Model).
+            models_root = model_path
+            while models_root.name != "models" and models_root.parent != models_root:
+                models_root = models_root.parent
 
-            # If Ultralytics reconstructed a legacy YOLOv7 class from pickle,
-            # its runtime API may not satisfy the Ultralytics predictor stack.
-            # In that case, use our explicit legacy wrapper instead.
-            inner_model = getattr(model, "model", None)
-            inner_module = getattr(getattr(inner_model, "__class__", None), "__module__", "")
-            if isinstance(inner_module, str) and inner_module.startswith("models.yolo"):
-                raise _ModelLoadError(
-                    "Checkpoint resolved to legacy models.yolo.* classes; switching to legacy loader"
-                )
+            models_parent = str(models_root.parent)
+            if models_parent not in sys.path:
+                sys.path.insert(0, models_parent)
+                logger.debug("Added %s to sys.path for legacy loader", models_parent)
 
-            logger.info("YOLOv8 loader succeeded for %s", spec["model_key"])
-            return {
-                "model": model,
-                "class_names": spec["class_names"],
-                "class_map": spec["class_map"],
-                "actor_type": spec["actor_type"],
-                "model_path": str(model_path),
-                "loader": "ultralytics",
-            }
-        except Exception as ultralytics_error:
-            logger.warning(
-                "Ultralytics loader failed for %s: %s. Trying legacy YOLOv7 compatibility loader.",
-                spec["model_key"],
-                ultralytics_error,
-            )
-
-        try:
             from models.yolo import load_legacy_yolov7_detector
 
             legacy_model = load_legacy_yolov7_detector(model_path, names=spec["class_names"])
@@ -242,10 +232,34 @@ class YOLOInferenceService:
                 "loader": "legacy_yolov7",
             }
         except Exception as legacy_error:
-            logger.error(
-                "Failed to load YOLO model %s via both loaders: %s",
+            logger.warning(
+                "Legacy YOLOv7 loader failed for %s: %s. Trying Ultralytics loader.",
                 spec["model_key"],
                 legacy_error,
+            )
+
+        # ---------- Fallback: Ultralytics YOLOv8 loader ----------
+        try:
+            from ultralytics import YOLO
+
+            model = YOLO(str(model_path))
+
+            logger.info("Ultralytics YOLOv8 loader succeeded for %s", spec["model_key"])
+            return {
+                "model": model,
+                "class_names": spec["class_names"],
+                "class_map": spec["class_map"],
+                "actor_type": spec["actor_type"],
+                "model_path": str(model_path),
+                "loader": "ultralytics",
+            }
+        except Exception as ultralytics_error:
+            logger.error(
+                "Failed to load YOLO model %s via both loaders. "
+                "Legacy error: %s | Ultralytics error: %s",
+                spec["model_key"],
+                legacy_error,
+                ultralytics_error,
             )
             return None
 
@@ -479,24 +493,64 @@ class YOLOInferenceService:
         image_data = base64.b64encode(buffer.getvalue()).decode()
         return f"data:image/{format.lower()};base64,{image_data}"
 
+    def save_annotated_image(
+        self,
+        image: Image.Image,
+        output_dir: Path,
+        filename: str,
+    ) -> Path:
+        """
+        Save an annotated PIL Image to disk.
+
+        Args:
+            image: Annotated PIL Image object
+            output_dir: Directory to save to (created if absent)
+            filename: Filename to use (extension preserved from original)
+
+        Returns:
+            The full path of the saved file.
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Normalise extension: keep original if it is jpg/jpeg/png, else default to png
+        stem = Path(filename).stem
+        suffix = Path(filename).suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            save_format = "JPEG"
+            out_name = f"{stem}{suffix}"
+        else:
+            save_format = "PNG"
+            out_name = f"{stem}.png"
+
+        out_path = output_dir / out_name
+        image.save(out_path, format=save_format)
+        logger.info("Saved annotated image to %s", out_path)
+        return out_path
+
     def process_frame(
         self,
         image_base64: str,
         conf_threshold: float = 0.5,
         student_id: Optional[str] = None,
         mode: Optional[str] = None,
+        output_dir: Optional[Path] = None,
+        source_filename: Optional[str] = None,
     ) -> Dict:
         """
         End-to-end frame processing:
         1. Decode base64 image
         2. Run YOLO inference
         3. Annotate image
-        4. Encode result
+        4. Optionally save annotated image to output_dir
+        5. Encode result
         
         Args:
             image_base64: Base64 encoded frame
             conf_threshold: Confidence threshold
             student_id: Optional student ID to assign to detections
+            mode: LEARNING or TESTING
+            output_dir: If provided, save annotated image here
+            source_filename: Original filename (used for the saved output filename)
             
         Returns:
             {
@@ -524,6 +578,16 @@ class YOLOInferenceService:
             
             # Annotate
             annotated_image = self.annotate_image(image, detections)
+
+            # Persist to disk when requested
+            saved_path = None
+            if output_dir and source_filename:
+                try:
+                    saved_path = self.save_annotated_image(
+                        annotated_image, output_dir, source_filename
+                    )
+                except Exception as save_err:
+                    logger.warning("Failed to save annotated image: %s", save_err)
             
             # Encode
             annotated_base64 = self.encode_image_to_base64(annotated_image)
@@ -533,6 +597,7 @@ class YOLOInferenceService:
                 "annotated_image_base64": annotated_base64,
                 "detection_count": len(detections),
                 "mode": active_mode,
+                "saved_output_path": str(saved_path) if saved_path else None,
             }
         
         except Exception as e:

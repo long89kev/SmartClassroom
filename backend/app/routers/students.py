@@ -17,7 +17,7 @@ from app.models import (
     Student,
     User,
 )
-from app.routers.auth import get_current_user
+from app.routers.auth import get_current_user, is_superuser
 from app.schemas.common import (
     StudentAttendanceSummary,
     StudentBehaviorSummaryItem,
@@ -30,6 +30,8 @@ router = APIRouter(prefix="/api/students/me", tags=["Student Dashboard"])
 
 
 def _ensure_student_role(current_user: User) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role != "STUDENT":
         raise HTTPException(status_code=403, detail="Only STUDENT role can access this endpoint")
 

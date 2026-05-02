@@ -7,17 +7,22 @@ from datetime import datetime
 from app.database import get_db
 from app.models import RiskIncident, ClassSession, Student, Room, Teacher, User
 from app.schemas.common import IncidentResponse, IncidentCreate, IncidentReview
-from app.routers.auth import get_current_user, get_user_room_scope, get_user_block_scope, get_user_permissions
+from app.routers.auth import get_current_user, get_user_room_scope, get_user_block_scope, get_user_permissions, is_superuser
 
 router = APIRouter(prefix="/api", tags=["Risk & Incidents"])
 
 
 def _ensure_incident_role(current_user: User, allowed_roles: set[str]) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role not in allowed_roles:
         raise HTTPException(status_code=403, detail="Insufficient role for incident access")
 
 
 def _ensure_incident_scope(current_user: User, room_id: UUID, db: Session) -> None:
+    if is_superuser(current_user):
+        return
+
     if current_user.role == "ACADEMIC_MANAGER":
         return
 
@@ -96,7 +101,7 @@ async def list_all_incidents(
             if incident.session and incident.session.room_id in assigned_rooms
         ]
 
-    if current_user.role == "ACADEMIC_MANAGER":
+    if current_user.role == "ACADEMIC_MANAGER" and not is_superuser(current_user):
         assigned_blocks = set(get_user_block_scope(current_user, db))
         incidents = [
             incident

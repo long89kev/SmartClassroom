@@ -165,6 +165,24 @@ export interface LatestFrameResponse {
   captured_at: string | null
 }
 
+export interface TempFrameResponse {
+  index: number
+  total: number
+  filename: string
+  image_base64: string
+  has_next: boolean
+  next_index: number | null
+}
+
+export interface TempOutputFrameResponse {
+  index: number
+  total: number
+  filename: string
+  image_base64: string
+  has_next: boolean
+  next_index: number | null
+}
+
 export interface Incident {
   id: string
   session_id: string

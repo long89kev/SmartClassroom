@@ -1,19 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List, Optional
 from datetime import datetime, time
+from pathlib import Path
 import base64
 
+from app.config import get_settings
 from app.database import get_db
 from app.models import ClassSession, Room, Teacher, Subject, Timetable, BehaviorLog, RiskIncident, PerformanceAggregate, User
 from app.schemas.common import (
     SessionCreate, SessionResponse, SessionModeChange, 
     BehaviorIngest, SessionAnalyticsResponse,
     LearningModeIngest, TestingModeIngest,
-    LearningModeResponse, TestingModeResponse
+    LearningModeResponse, TestingModeResponse, TempFrameResponse,
+    TempOutputFrameResponse, UploadAnalyzeResponse
 )
-from app.routers.auth import get_current_user, get_user_room_scope, get_user_permissions, check_mode_access
+from app.routers.auth import get_current_user, get_user_room_scope, get_user_permissions, check_mode_access, is_superuser
 from app.services.grading_engine import PerformanceScorer, RiskDetector
 from app.services.yolo_inference import YOLOInferenceService
 
@@ -22,13 +25,57 @@ router = APIRouter(prefix="/api", tags=["Sessions & AI"])
 # Initialize AI services (YOLO only, RiskDetector created per-request)
 yolo_service = YOLOInferenceService()
 
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+
+def _resolve_temp_frames_dir(raw_path: str) -> Path:
+    temp_dir = Path(raw_path)
+    if temp_dir.is_absolute():
+        return temp_dir
+
+    repo_root = Path(__file__).resolve().parents[3]
+    return repo_root.joinpath(temp_dir)
+
+
+def _list_temp_frames(temp_dir: Path, sort: str) -> List[Path]:
+    if not temp_dir.exists() or not temp_dir.is_dir():
+        return []
+
+    candidates = [
+        path
+        for path in temp_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
+    ]
+
+    if sort == "mtime":
+        candidates.sort(key=lambda path: path.stat().st_mtime)
+    else:
+        candidates.sort(key=lambda path: path.name.lower())
+
+    return candidates
+
+
+def _resolve_image_mime(file_path: Path) -> str:
+    suffix = file_path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".png":
+        return "image/png"
+    return "application/octet-stream"
+
 
 def _ensure_session_role(current_user: User, allowed_roles: set[str]) -> None:
+    if is_superuser(current_user):
+        return
+
     if current_user.role not in allowed_roles:
         raise HTTPException(status_code=403, detail="Insufficient role for this session action")
 
 
 def _ensure_room_scope(current_user: User, room_id: UUID, db: Session) -> None:
+    if is_superuser(current_user):
+        return
+
     if current_user.role == "ACADEMIC_MANAGER":
         return
 
@@ -259,7 +306,53 @@ async def get_tutor_room_context(
         db,
         {"dashboard:view_classroom", "dashboard:view_block", "dashboard:view_university", "dashboard:view_minimal"},
     )
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR"})
+
+    # For INSTRUCTOR roles, use room assignments; for superuser/ACADEMIC_MANAGER, find any active session
+    if current_user.role not in {"INSTRUCTOR", "INSTRUCTOR"} and not is_superuser(current_user) and current_user.role != "ACADEMIC_MANAGER":
+        raise HTTPException(status_code=403, detail="Role cannot resolve room context")
+
+    # Superuser / ACADEMIC_MANAGER: find the most recent active session across all rooms
+    if is_superuser(current_user) or current_user.role == "ACADEMIC_MANAGER":
+        recent_active = (
+            db.query(ClassSession)
+            .filter(ClassSession.status == "ACTIVE")
+            .order_by(ClassSession.start_time.desc())
+            .first()
+        )
+        if not recent_active or not recent_active.room:
+            return {
+                "building_id": None,
+                "floor_id": None,
+                "room_id": None,
+                "room_code": None,
+                "active_sessions": [],
+                "selected_session_id": None,
+                "selection_reason": "no_assigned_room",
+            }
+
+        selected_room = recent_active.room
+        building_id = selected_room.floor.building_id if selected_room.floor else None
+
+        all_active_in_room = (
+            db.query(ClassSession)
+            .filter(ClassSession.room_id == selected_room.id, ClassSession.status == "ACTIVE")
+            .order_by(ClassSession.start_time.desc())
+            .all()
+        )
+        active_summaries = []
+        for sess in all_active_in_room:
+            risk_alerts_count = db.query(RiskIncident).filter(RiskIncident.session_id == sess.id).count()
+            active_summaries.append(_serialize_session_summary(sess, risk_alerts_count))
+
+        return {
+            "building_id": building_id,
+            "floor_id": selected_room.floor_id,
+            "room_id": selected_room.id,
+            "room_code": selected_room.room_code,
+            "active_sessions": active_summaries,
+            "selected_session_id": recent_active.id,
+            "selection_reason": "room_recent_active",
+        }
 
     allowed_room_ids = get_user_room_scope(current_user, db)
     if not allowed_room_ids:
@@ -567,12 +660,18 @@ async def ingest_learning_mode(
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
 
+        # Resolve output directory for annotated images
+        settings = get_settings()
+        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir) if behavior.source_filename else None
+
         # Run YOLO inference on image
         frame_result = yolo_service.process_frame(
             behavior.image_base64,
             conf_threshold=behavior.confidence_threshold,
             student_id=behavior.student_id,
             mode="LEARNING",
+            output_dir=output_dir,
+            source_filename=behavior.source_filename,
         )
         
         # Store detections as behavior logs
@@ -687,12 +786,18 @@ async def ingest_testing_mode(
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
         
+        # Resolve output directory for annotated images
+        settings = get_settings()
+        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir) if behavior.source_filename else None
+
         # Run YOLO inference on image
         frame_result = yolo_service.process_frame(
             behavior.image_base64,
             conf_threshold=behavior.confidence_threshold,
             student_id=None,  # Will be assigned from face detection
             mode="TESTING",
+            output_dir=output_dir,
+            source_filename=behavior.source_filename,
         )
         
         # Store detection logs (skip if no valid student_id)
@@ -940,6 +1045,216 @@ async def get_latest_session_frame(
         "captured_at": None
     }
 
+
+@router.get("/sessions/{session_id}/temp-frame", response_model=TempFrameResponse)
+async def get_temp_replay_frame(
+    session_id: UUID,
+    index: int = 0,
+    sort: str = "name",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Return a single Temp replay frame (dev only)."""
+    settings = get_settings()
+    if not settings.debug and not settings.temp_frames_enabled:
+        raise HTTPException(status_code=404, detail="Temp replay is disabled")
+
+    _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
+
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_room_scope(current_user, session.room_id, db)
+
+    if index < 0:
+        raise HTTPException(status_code=400, detail="Index must be >= 0")
+
+    sort_key = sort.strip().lower() if sort else "name"
+    if sort_key not in {"name", "mtime"}:
+        raise HTTPException(status_code=400, detail="Sort must be name or mtime")
+
+    temp_dir = _resolve_temp_frames_dir(settings.temp_frames_dir)
+    frames = _list_temp_frames(temp_dir, sort_key)
+
+    if not frames:
+        raise HTTPException(status_code=404, detail="No temp frames available")
+
+    if index >= len(frames):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Index out of range (max {len(frames) - 1})",
+        )
+
+    frame_path = frames[index]
+    try:
+        image_bytes = frame_path.read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read temp frame: {exc}")
+
+    mime_type = _resolve_image_mime(frame_path)
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    image_base64 = f"data:{mime_type};base64,{encoded}"
+
+    next_index = index + 1 if index + 1 < len(frames) else None
+
+    return TempFrameResponse(
+        index=index,
+        total=len(frames),
+        filename=frame_path.name,
+        image_base64=image_base64,
+        has_next=next_index is not None,
+        next_index=next_index,
+    )
+
+
+@router.get("/sessions/{session_id}/temp-output-frame", response_model=TempOutputFrameResponse)
+async def get_temp_output_frame(
+    session_id: UUID,
+    index: int = 0,
+    sort: str = "name",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Browse annotated output frames from Temp_output directory."""
+    settings = get_settings()
+
+    _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
+
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_room_scope(current_user, session.room_id, db)
+
+    if index < 0:
+        raise HTTPException(status_code=400, detail="Index must be >= 0")
+
+    sort_key = sort.strip().lower() if sort else "name"
+    if sort_key not in {"name", "mtime"}:
+        raise HTTPException(status_code=400, detail="Sort must be name or mtime")
+
+    output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
+    frames = _list_temp_frames(output_dir, sort_key)
+
+    if not frames:
+        raise HTTPException(status_code=404, detail="No annotated output frames available")
+
+    if index >= len(frames):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Index out of range (max {len(frames) - 1})",
+        )
+
+    frame_path = frames[index]
+    try:
+        image_bytes = frame_path.read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read output frame: {exc}")
+
+    mime_type = _resolve_image_mime(frame_path)
+    encoded = base64.b64encode(image_bytes).decode("utf-8")
+    image_base64 = f"data:{mime_type};base64,{encoded}"
+
+    next_index = index + 1 if index + 1 < len(frames) else None
+
+    return TempOutputFrameResponse(
+        index=index,
+        total=len(frames),
+        filename=frame_path.name,
+        image_base64=image_base64,
+        has_next=next_index is not None,
+        next_index=next_index,
+    )
+
+
+@router.post("/sessions/{session_id}/temp-batch-inference")
+async def run_temp_batch_inference(
+    session_id: UUID,
+    mode: str = "LEARNING",
+    confidence_threshold: float = 0.5,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Batch process ALL Temp images through YOLO inference.
+    Reads from Temp/, runs YOLO, saves labeled images to Temp_output/.
+    Returns processing results with annotated image count.
+    """
+    settings = get_settings()
+
+    _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
+
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_room_scope(current_user, session.room_id, db)
+
+    if not yolo_service.is_ready():
+        raise HTTPException(status_code=503, detail="YOLO model not loaded")
+
+    # Read all input frames
+    input_dir = _resolve_temp_frames_dir(settings.temp_frames_dir)
+    output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
+    input_frames = _list_temp_frames(input_dir, "name")
+
+    if not input_frames:
+        raise HTTPException(status_code=404, detail="No temp frames available in input directory")
+
+    resolved_mode = mode.upper()
+    if resolved_mode not in {"LEARNING", "TESTING"}:
+        resolved_mode = "LEARNING"
+
+    results = []
+    errors = []
+
+    for frame_path in input_frames:
+        try:
+            image_bytes = frame_path.read_bytes()
+            mime_type = _resolve_image_mime(frame_path)
+            encoded = base64.b64encode(image_bytes).decode("utf-8")
+            image_base64 = f"data:{mime_type};base64,{encoded}"
+
+            frame_result = yolo_service.process_frame(
+                image_base64,
+                conf_threshold=confidence_threshold,
+                student_id=None,
+                mode=resolved_mode,
+                output_dir=output_dir,
+                source_filename=frame_path.name,
+            )
+
+            results.append({
+                "filename": frame_path.name,
+                "detection_count": frame_result["detection_count"],
+                "saved_output_path": frame_result.get("saved_output_path"),
+            })
+        except Exception as e:
+            errors.append({
+                "filename": frame_path.name,
+                "error": str(e),
+            })
+
+    # Return the last annotated image as the preview
+    last_annotated_base64 = None
+    if results:
+        last_output = output_dir / results[-1]["filename"]
+        if last_output.exists():
+            try:
+                out_bytes = last_output.read_bytes()
+                out_mime = _resolve_image_mime(last_output)
+                last_annotated_base64 = f"data:{out_mime};base64,{base64.b64encode(out_bytes).decode('utf-8')}"
+            except Exception:
+                pass
+
+    return {
+        "total_input": len(input_frames),
+        "processed": len(results),
+        "errors": len(errors),
+        "results": results,
+        "error_details": errors,
+        "last_annotated_image_base64": last_annotated_base64,
+        "mode": resolved_mode,
+    }
+
 @router.get("/sessions/{session_id}/behavior-logs")
 async def get_session_behavior_logs(
     session_id: UUID,
@@ -1096,3 +1411,99 @@ async def get_active_sessions(
             for s in sessions
         ]
     }
+
+import uuid
+
+@router.post("/sessions/{session_id}/upload-analyze", response_model=UploadAnalyzeResponse)
+async def upload_and_analyze_image(
+    session_id: UUID,
+    file: UploadFile = File(...),
+    mode: str = "LEARNING",
+    confidence_threshold: float = 0.5,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload an image, run YOLO inference, and store the result in BehaviorLogs.
+    Returns the annotated image and detections.
+    """
+    _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
+    
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    _ensure_room_scope(current_user, session.room_id, db)
+    
+    if not yolo_service.is_ready():
+        raise HTTPException(status_code=503, detail="YOLO model not loaded")
+        
+    resolved_mode = mode.upper()
+    if resolved_mode not in {"LEARNING", "TESTING"}:
+        resolved_mode = "LEARNING"
+        
+    try:
+        image_bytes = await file.read()
+        
+        suffix = Path(file.filename).suffix.lower() if file.filename else ".jpg"
+        if suffix not in {".jpg", ".jpeg", ".png"}:
+            suffix = ".jpg"
+            
+        mime_type = "image/jpeg" if suffix in {".jpg", ".jpeg"} else "image/png"
+        encoded = base64.b64encode(image_bytes).decode("utf-8")
+        image_base64 = f"data:{mime_type};base64,{encoded}"
+        
+        # Generate dummy actor ID for unknown actors in the upload
+        dummy_actor_id = uuid.uuid4()
+        
+        frame_result = yolo_service.process_frame(
+            image_base64,
+            conf_threshold=confidence_threshold,
+            student_id=dummy_actor_id,
+            mode=resolved_mode,
+            output_dir=None,
+            source_filename=file.filename
+        )
+        
+        annotated_base64 = frame_result.get("annotated_image_base64")
+        if not annotated_base64:
+            raise ValueError("No annotated image returned from YOLO service")
+            
+        if "," in annotated_base64:
+            b64_data = annotated_base64.split(",")[1]
+        else:
+            b64_data = annotated_base64
+            
+        annotated_bytes = base64.b64decode(b64_data)
+        
+        detections = frame_result.get("detections", [])
+        logs_created = 0
+        
+        for detection in detections:
+            log = BehaviorLog(
+                session_id=session_id,
+                actor_id=dummy_actor_id,
+                actor_type="STUDENT",
+                behavior_class=detection["behavior_class"],
+                count=1,
+                duration_seconds=0,
+                frame_snapshot=annotated_bytes,
+                yolo_confidence=detection["confidence"],
+                detected_at=datetime.utcnow()
+            )
+            db.add(log)
+            logs_created += 1
+            
+        if logs_created > 0:
+            db.commit()
+            
+        return {
+            "annotated_image_base64": annotated_base64,
+            "detections": detections,
+            "logs_created": logs_created
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to process uploaded image: {str(e)}")
+
