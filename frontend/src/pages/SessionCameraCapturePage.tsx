@@ -129,6 +129,12 @@ export function SessionCameraCapturePage(): JSX.Element {
     setDiagnosticMessage(errorMessage)
   }, [])
 
+  const handleSelectFeatured = useCallback((img: any) => {
+    setFeaturedImage(img)
+    setAnnotatedImage(img.url)
+    setLastDetections(img.detections || [])
+  }, [])
+
   // Resolved room context for the session (needed for admin users who have no room assignments)
   const [sessionBuildingId, setSessionBuildingId] = useState<string | null>(null)
   const [sessionRoomId, setSessionRoomId] = useState<string | null>(null)
@@ -299,7 +305,7 @@ export function SessionCameraCapturePage(): JSX.Element {
 
       try {
         const response = await getBehaviorLogs(sessionId, {
-          limit: 20,
+          limit: 100, // Fetch more to get enough unique images
           offset: logOffset,
         })
 
@@ -307,6 +313,34 @@ export function SessionCameraCapturePage(): JSX.Element {
 
         setBehaviorLogs(response.logs)
         setLogTotal(response.total)
+
+        // Populate gallery with unique images from the fetched logs
+        const uniqueImages = new Map()
+        for (const log of response.logs) {
+          if (log.frame_snapshot && !uniqueImages.has(log.frame_snapshot)) {
+            uniqueImages.set(log.frame_snapshot, {
+              url: log.frame_snapshot as string,
+              timestamp: new Date(log.detected_at),
+              detections: response.logs
+                .filter(l => l.frame_snapshot === log.frame_snapshot)
+                .map(l => ({
+                  behavior_class: l.behavior_class,
+                  confidence: l.yolo_confidence
+                }))
+            })
+          }
+        }
+        const historyImages = Array.from(uniqueImages.values())
+        
+        setGalleryImages((prev) => {
+          if (logOffset === 0) {
+            return historyImages.slice(0, 12)
+          }
+          const existingUrls = new Set(prev.map(p => p.url))
+          const newUnique = historyImages.filter(img => !existingUrls.has(img.url))
+          return [...prev, ...newUnique].slice(0, 12)
+        })
+
       } catch (err) {
         if (!isMounted) return
         // Silent fail for logs

@@ -138,24 +138,6 @@ class RiskDetector:
          + 0.1 * (gaze_away_instances / max_gaze)
     """
 
-    RISK_WEIGHTS = {
-        # Testing mode target labels
-        "USING_PHONE": 0.4,
-        "USING_COMPUTER": 0.35,
-        "TALK": 0.3,
-        "DISCUSS": 0.3,
-        "TURN_THE_HEAD": 0.2,
-
-        # Backward compatibility for older label names
-        "DEVICE_USAGE": 0.4,
-        "USING_DEVICE": 0.4,
-        "CHEATING": 0.4,
-        "UNAUTHORIZED_OBJECT": 0.35,
-        "TALKING": 0.3,
-        "HEAD_TURN": 0.2,
-        "EYE_GAZE_AWAY": 0.1,
-    }
-
     BEHAVIOR_ALIASES = {
         "TURN_HEAD": "TURN_THE_HEAD",
         "HEAD_TURN": "TURN_THE_HEAD",
@@ -164,10 +146,44 @@ class RiskDetector:
         "USING_DEVICE": "USING_PHONE",
     }
 
-    RISK_THRESHOLD = 0.65  # Trigger incident if risk > 65%
-
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, profile_name: str = 'DEFAULT_TESTING'):
         self.db = db
+        
+        # Load risk weights from DB
+        risk_profile = self.db.query(RiskWeight).filter(RiskWeight.risk_behavior == profile_name).first()
+        
+        if risk_profile:
+            self.RISK_WEIGHTS = {
+                "USING_PHONE": risk_profile.gamma_device_use,
+                "USING_COMPUTER": risk_profile.gamma_device_use * 0.875,
+                "TALK": risk_profile.beta_talk,
+                "DISCUSS": risk_profile.beta_talk,
+                "TURN_THE_HEAD": risk_profile.alpha_head_turn,
+                "DEVICE_USAGE": risk_profile.gamma_device_use,
+                "USING_DEVICE": risk_profile.gamma_device_use,
+                "CHEATING": risk_profile.gamma_device_use,
+                "UNAUTHORIZED_OBJECT": risk_profile.gamma_device_use * 0.875,
+                "TALKING": risk_profile.beta_talk,
+                "HEAD_TURN": risk_profile.alpha_head_turn,
+                "EYE_GAZE_AWAY": risk_profile.alpha_head_turn * 0.5,
+            }
+            self.RISK_THRESHOLD = risk_profile.alert_threshold / 100.0
+        else:
+            self.RISK_WEIGHTS = {
+                "USING_PHONE": 0.4,
+                "USING_COMPUTER": 0.35,
+                "TALK": 0.3,
+                "DISCUSS": 0.3,
+                "TURN_THE_HEAD": 0.2,
+                "DEVICE_USAGE": 0.4,
+                "USING_DEVICE": 0.4,
+                "CHEATING": 0.4,
+                "UNAUTHORIZED_OBJECT": 0.35,
+                "TALKING": 0.3,
+                "HEAD_TURN": 0.2,
+                "EYE_GAZE_AWAY": 0.1,
+            }
+            self.RISK_THRESHOLD = 0.65
 
     def normalize_behavior(self, behavior_class: str) -> str:
         """Normalize behavior names to canonical scoring labels."""
