@@ -481,8 +481,14 @@ export function BuildingSessionsPage(): JSX.Element {
     const controller = new AbortController()
     const timeoutId = window.setTimeout(() => controller.abort(), 1800)
 
+    const token = useAuthStore.getState().token
     try {
-      const response = await fetch(buildAttendanceStreamUrl('/status'), { signal: controller.signal })
+      const response = await fetch(buildAttendanceStreamUrl('/status'), { 
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
       if (!response.ok) {
         throw new Error('Service offline')
       }

@@ -4,7 +4,7 @@ Grading and risk detection engine for AI classroom monitoring.
 - RiskDetector: Detects cheating/suspicious behavior in TESTING mode
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime
@@ -17,6 +17,18 @@ from app.models import (
     RiskWeight,
     BehaviorClass,
 )
+from uuid import UUID
+import base64
+
+UNKNOWN_STUDENT_ID = UUID("00000000-0000-0000-0000-000000000000")
+
+def _safe_uuid(val: Any) -> UUID:
+    if isinstance(val, UUID):
+        return val
+    try:
+        return UUID(str(val))
+    except (ValueError, TypeError):
+        return UNKNOWN_STUDENT_ID
 
 
 class PerformanceScorer:
@@ -50,9 +62,10 @@ class PerformanceScorer:
         Returns:
             Performance score (0-100)
         """
+        target_actor_id = _safe_uuid(actor_id)
         behavior_logs = self.db.query(BehaviorLog).filter(
             BehaviorLog.session_id == session_id,
-            BehaviorLog.actor_id == actor_id,
+            BehaviorLog.actor_id == target_actor_id,
             BehaviorLog.actor_type == actor_type,
             BehaviorLog.created_at >= datetime.utcnow().replace(hour=0, minute=0, second=0),
         )
@@ -65,7 +78,7 @@ class PerformanceScorer:
             PerformanceWeight.subject_id == subject_id if subject_id else True
         )
 
-        weight_map = {w.behavior_class: w.weight for w in weights}
+        weight_map = {w.behavior_name: w.weight for w in weights}
 
         total_score = 0
         total_weight = 0
@@ -87,21 +100,22 @@ class PerformanceScorer:
         performance_score: float,
     ):
         """Store performance score in aggregate table."""
+        target_actor_id = _safe_uuid(actor_id)
         aggregate = self.db.query(PerformanceAggregate).filter(
             PerformanceAggregate.session_id == session_id,
-            PerformanceAggregate.actor_id == actor_id,
+            PerformanceAggregate.actor_id == target_actor_id,
             PerformanceAggregate.actor_type == actor_type,
         ).first()
 
         if aggregate:
-            aggregate.final_score = performance_score
-            aggregate.updated_at = datetime.utcnow()
+            aggregate.total_score = performance_score
+            aggregate.calculated_at = datetime.utcnow()
         else:
             aggregate = PerformanceAggregate(
                 session_id=session_id,
-                actor_id=actor_id,
+                actor_id=target_actor_id,
                 actor_type=actor_type,
-                final_score=performance_score,
+                total_score=performance_score,
             )
             self.db.add(aggregate)
 
@@ -219,16 +233,26 @@ class RiskDetector:
         """Auto-create risk incident when threshold exceeded."""
         risk_level = self.get_risk_level(risk_score)
 
+        # Decode base64 snapshot to bytes if provided
+        snapshot_bytes = None
+        if image_with_detections:
+            try:
+                b64_data = image_with_detections
+                if "," in b64_data:
+                    b64_data = b64_data.split(",")[1]
+                snapshot_bytes = base64.b64decode(b64_data)
+            except Exception:
+                pass
+
+        target_student_id = _safe_uuid(student_id)
         incident = RiskIncident(
             session_id=session_id,
-            student_id=student_id,
-            room_id=room_id,
+            student_id=target_student_id,
             risk_score=risk_score,
             risk_level=risk_level,
-            behavior_flags=behavior_details,
-            snapshot_image=image_with_detections,
+            triggered_behaviors=behavior_details,
+            frame_snapshot=snapshot_bytes,
             flagged_at=datetime.utcnow(),
-            status="FLAGGED",
         )
 
         self.db.add(incident)

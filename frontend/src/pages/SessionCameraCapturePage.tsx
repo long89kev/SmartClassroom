@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { Play, Square, AlertCircle, RefreshCw, ChevronLeft, ChevronRight, Upload } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { Play, Square, AlertCircle, RefreshCw, Upload, Camera, Activity } from 'lucide-react'
 import { CameraIngestPanel, type CameraIngestPanelHandle } from '../components/CameraIngestPanel'
 import { useCameraInterval } from '../hooks/useCameraInterval'
 import { useFrameUpload } from '../hooks/useFrameUpload'
-import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage } from '../services/api'
-import type { SessionSummary, BehaviorLogEntry, TempOutputFrameResponse } from '../types'
+import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, ingestLearningMode, ingestTestingMode, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage } from '../services/api'
+import type { BehaviorLogEntry, LearningModeResponse, SessionSummary, TempOutputFrameResponse, TestingModeResponse } from '../types'
 import './SessionCameraCapturePage.css'
 
 export function SessionCameraCapturePage(): JSX.Element {
   const { sessionId } = useParams<{ sessionId: string }>()
-  const navigate = useNavigate()
 
   const cameraRef = useRef<CameraIngestPanelHandle | null>(null)
   const [session, setSession] = useState<SessionSummary | null>(null)
@@ -22,7 +21,7 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [logTotal, setLogTotal] = useState(0)
   const [loadingLogs, setLoadingLogs] = useState(false)
 
-  const [annotatedImage, setAnnotatedImage] = useState<string | null>(null)
+  const [, setAnnotatedImage] = useState<string | null>(null)
   const [lastDetections, setLastDetections] = useState<any[]>([])
 
   const [captureSource, setCaptureSource] = useState<'LIVE' | 'TEMP' | 'UPLOAD'>('LIVE')
@@ -33,9 +32,102 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [tempError, setTempError] = useState<string | null>(null)
   const [modeSwitching, setModeSwitching] = useState(false)
   const [modeSwitchError, setModeSwitchError] = useState<string | null>(null)
+  const [cameraState, setCameraState] = useState<'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'ERROR'>('IDLE')
+  const [diagnosticLogs, setDiagnosticLogs] = useState<{ id: number; level: string; message: string; time: Date }[]>([])
+  const logIdRef = useRef(0)
+
+  // Intercept console messages for the UI monitor
+  useEffect(() => {
+    const originalDebug = console.debug
+    const originalInfo = console.info
+    const originalWarn = console.warn
+    const originalError = console.error
+
+    const addLog = (level: string, ...args: any[]) => {
+      const message = args.map(arg => {
+        if (typeof arg === 'object' && arg !== null) {
+          const cache = new Set();
+          try {
+            return JSON.stringify(arg, (key, value) => {
+              if (typeof value === 'object' && value !== null) {
+                if (cache.has(value)) return '[Circular]';
+                cache.add(value);
+              }
+              return typeof value === 'bigint' ? value.toString() : value;
+            }, 2);
+          } catch {
+            return `[Complex Object: ${Object.prototype.toString.call(arg)}]`;
+          } finally {
+            cache.clear();
+          }
+        }
+        return String(arg);
+      }).join(' ')
+      
+      const newLog = { id: ++logIdRef.current, level, message, time: new Date() }
+      setDiagnosticLogs(prev => [newLog, ...prev].slice(0, 50))
+    }
+
+    console.debug = (...args) => {
+      originalDebug(...args)
+      addLog('DEBUG', ...args)
+    }
+    console.info = (...args) => {
+      originalInfo(...args)
+      addLog('INFO', ...args)
+    }
+    console.warn = (...args) => {
+      originalWarn(...args)
+      addLog('WARN', ...args)
+    }
+    console.error = (...args) => {
+      originalError(...args)
+      addLog('ERROR', ...args)
+    }
+
+    return () => {
+      console.debug = originalDebug
+      console.info = originalInfo
+      console.warn = originalWarn
+      console.error = originalError
+    }
+  }, [])
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null)
 
   const tempIndexRef = useRef(0)
   const tempFilenameRef = useRef<string | null>(null)
+
+  // --- Gallery Logic ---
+  const [galleryImages, setGalleryImages] = useState<{
+    url: string
+    timestamp: Date
+    detections: any[]
+  }[]>([])
+  const [featuredImage, setFeaturedImage] = useState<{
+    url: string
+    timestamp: Date
+    detections: any[]
+  } | null>(null)
+
+  const handleFrameUploadSuccess = useCallback(
+    (response: LearningModeResponse | TestingModeResponse): void => {
+      const newImage = {
+        url: response.annotated_image_base64,
+        timestamp: new Date(),
+        detections: response.detections,
+      }
+
+      setGalleryImages((prev) => [newImage, ...prev].slice(0, 12))
+      setFeaturedImage(newImage)
+      setAnnotatedImage(newImage.url)
+      setLastDetections(newImage.detections || [])
+    },
+    [],
+  )
+
+  const handleFrameUploadError = useCallback((errorMessage: string): void => {
+    setDiagnosticMessage(errorMessage)
+  }, [])
 
   // Resolved room context for the session (needed for admin users who have no room assignments)
   const [sessionBuildingId, setSessionBuildingId] = useState<string | null>(null)
@@ -96,6 +188,8 @@ export function SessionCameraCapturePage(): JSX.Element {
     inferenceMode,
     captureSource === 'TEMP',
     getSourceFilename,
+    handleFrameUploadSuccess,
+    handleFrameUploadError,
   )
 
   // Output gallery state
@@ -108,9 +202,6 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [batchProcessing, setBatchProcessing] = useState(false)
   const [batchResult, setBatchResult] = useState<TempBatchInferenceResponse | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
-  const [autoPlayIndex, setAutoPlayIndex] = useState(0)
-  const autoPlayTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
   // Upload inference state
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadProcessing, setUploadProcessing] = useState(false)
@@ -231,13 +322,88 @@ export function SessionCameraCapturePage(): JSX.Element {
     }
   }, [sessionId, logOffset])
 
-  // Handle last response updates
-  useEffect(() => {
-    if (frameUpload.lastResponse) {
-      setAnnotatedImage(frameUpload.lastResponse.annotated_image_base64)
-      setLastDetections(frameUpload.lastResponse.detections || [])
+  const handleStopUploading = useCallback(() => {
+    frameUpload.stopUploading()
+    setDiagnosticMessage('Capture loop stopped')
+  }, [frameUpload])
+
+  const handleTestCapture = useCallback(async () => {
+    if (!sessionId || !session) return
+    setDiagnosticMessage(null)
+    console.info('[Diagnostic] Manually triggering test capture...')
+    
+    if (cameraState !== 'RUNNING') {
+      console.warn('[Diagnostic] Camera not running. Starting it first...')
+      const state = await cameraRef.current?.startCamera()
+      if (state !== 'RUNNING') {
+        console.error('[Diagnostic] Failed to start camera')
+        return
+      }
     }
-  }, [frameUpload.lastResponse])
+
+    const dataUri = await cameraRef.current?.captureFrame()
+    if (!dataUri) {
+      console.error('[Diagnostic] Capture returned null')
+      setDiagnosticMessage('Capture failed - check console for details')
+    } else {
+      console.info(`[Diagnostic] Capture success! Length: ${dataUri.length}. Running inference...`)
+      setDiagnosticMessage('Capturing & analyzing...')
+
+      try {
+        const resolvedMode = inferenceMode === 'TESTING' ? 'TESTING' : 'LEARNING'
+        let response: LearningModeResponse | TestingModeResponse
+
+        if (resolvedMode === 'TESTING') {
+          response = await ingestTestingMode(sessionId, {
+            image_base64: dataUri,
+            students_present: session.students_present || [],
+            confidence_threshold: 0.5,
+          })
+        } else {
+          response = await ingestLearningMode(sessionId, {
+            image_base64: dataUri,
+            confidence_threshold: 0.5,
+          })
+        }
+
+        console.info(`[Diagnostic] Inference success! Detections: ${response.detection_count}`)
+        setDiagnosticMessage(`Test capture & inference successful: ${response.detection_count} behaviors found`)
+        
+        handleFrameUploadSuccess(response)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Inference failed'
+        console.error('[Diagnostic] Inference failed:', err)
+        setDiagnosticMessage(`Inference failed: ${msg}`)
+        
+        // Still show the raw image even if inference fails
+        const rawImg = {
+          url: dataUri,
+          timestamp: new Date(),
+          detections: []
+        }
+        setFeaturedImage(rawImg)
+        setAnnotatedImage(dataUri)
+      }
+    }
+  }, [cameraState, sessionId, session, inferenceMode, handleFrameUploadSuccess])
+
+  const handleStartUploading = useCallback(async () => {
+    setDiagnosticMessage(null)
+
+    const startedState = await cameraRef.current?.startCamera()
+    if (startedState !== 'RUNNING') {
+      setDiagnosticMessage(`Camera did not become ready. Current state: ${startedState ?? 'UNKNOWN'}`)
+      return
+    }
+
+    if (typeof intervalMs !== 'number' || intervalMs <= 0) {
+      setDiagnosticMessage('Refresh interval is invalid or missing.')
+      return
+    }
+
+    frameUpload.startUploading()
+    setDiagnosticMessage(`Capture loop started at ${intervalMs}ms`)
+  }, [frameUpload, intervalMs])
 
   // Reload output gallery whenever a new frame is uploaded
   useEffect(() => {
@@ -300,7 +466,6 @@ export function SessionCameraCapturePage(): JSX.Element {
     setBatchResult(null)
     setAnnotatedImage(null)
     setOutputFrame(null)
-    setAutoPlayIndex(0)
 
     try {
       const result = await runTempBatchInference(sessionId, {
@@ -341,43 +506,6 @@ export function SessionCameraCapturePage(): JSX.Element {
       setBatchProcessing(false)
     }
   }, [sessionId, inferenceMode])
-
-  // Auto-play through output frames
-  const handleAutoPlay = useCallback(() => {
-    if (!sessionId || !batchResult || batchResult.processed === 0) return
-
-    if (autoPlayTimerRef.current) {
-      clearInterval(autoPlayTimerRef.current)
-      autoPlayTimerRef.current = null
-      return
-    }
-
-    let idx = 0
-    setAutoPlayIndex(0)
-    void loadOutputFrame(0)
-
-    autoPlayTimerRef.current = setInterval(() => {
-      idx += 1
-      if (idx >= (batchResult?.processed ?? 0)) {
-        if (autoPlayTimerRef.current) {
-          clearInterval(autoPlayTimerRef.current)
-          autoPlayTimerRef.current = null
-        }
-        return
-      }
-      setAutoPlayIndex(idx)
-      void loadOutputFrame(idx)
-    }, 1500)
-  }, [sessionId, batchResult, loadOutputFrame])
-
-  // Cleanup auto-play on unmount
-  useEffect(() => {
-    return () => {
-      if (autoPlayTimerRef.current) {
-        clearInterval(autoPlayTimerRef.current)
-      }
-    }
-  }, [])
 
   // Upload inference handler
   const handleUploadAndAnalyze = useCallback(async () => {
@@ -574,7 +702,7 @@ export function SessionCameraCapturePage(): JSX.Element {
           </div>
 
           {captureSource === 'LIVE' ? (
-            <CameraIngestPanel ref={cameraRef} />
+            <CameraIngestPanel ref={cameraRef} onStateChange={setCameraState} />
           ) : captureSource === 'TEMP' ? (
             <div className="temp-replay-panel">
               <p className="muted">Streaming frames from backend/app/services/Temp.</p>
@@ -648,32 +776,35 @@ export function SessionCameraCapturePage(): JSX.Element {
               </button>
             ) : (
               /* Live Camera: Use the existing frame upload hooks */
-              frameUpload.isUploading ? (
+              <div className="button-group-row">
                 <button
-                  className="btn btn-danger"
+                  className={`btn ${frameUpload.isUploading ? 'btn-danger' : 'btn-primary'}`}
                   onClick={() => {
-                    frameUpload.stopUploading()
-                    cameraRef.current?.stopCamera()
-                  }}
-                  style={{ width: '100%' }}
-                >
-                  <Square size={16} /> Stop Uploading
-                </button>
-              ) : (
-                <button
-                  className="btn btn-primary"
-                  onClick={async () => {
-                    await cameraRef.current?.startCamera()
-                    if (cameraRef.current?.getState() === 'RUNNING') {
-                      frameUpload.startUploading()
+                    if (frameUpload.isUploading) {
+                      handleStopUploading()
+                    } else {
+                      void handleStartUploading()
                     }
                   }}
                   disabled={!canStartCapture}
-                  style={{ width: '100%' }}
                 >
-                  <Play size={16} /> Start Uploading
+                  {frameUpload.isUploading ? (
+                    <><Square size={16} /> Stop Uploading</>
+                  ) : (
+                    <><Play size={16} /> Start Uploading</>
+                  )}
                 </button>
-              )
+
+                {!frameUpload.isUploading && captureSource === 'LIVE' && (
+                  <button 
+                    className="btn btn-outline" 
+                    onClick={handleTestCapture}
+                    title="Run a single test capture"
+                  >
+                    <Camera size={16} /> Test Capture
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -681,6 +812,9 @@ export function SessionCameraCapturePage(): JSX.Element {
             <p>
               <strong>Status:</strong>{' '}
               {batchProcessing ? 'Batch Processing...' : uploadProcessing ? 'Analyzing...' : frameUpload.isUploading ? 'Capturing' : 'Idle'}
+            </p>
+            <p>
+              <strong>Camera State:</strong> {cameraState}
             </p>
             <p>
               <strong>Source:</strong> {captureSource}
@@ -694,6 +828,11 @@ export function SessionCameraCapturePage(): JSX.Element {
             <p>
               <strong>Interval:</strong> {intervalMs}ms ({sourceScope} scope)
             </p>
+            {diagnosticMessage && (
+              <p className="muted">
+                <strong>Diagnostic:</strong> {diagnosticMessage}
+              </p>
+            )}
             {batchResult && (
               <>
                 <p>
@@ -723,6 +862,11 @@ export function SessionCameraCapturePage(): JSX.Element {
                 <p>
                   <strong>Frames Uploaded:</strong> {frameUpload.framesUploaded}
                 </p>
+                {frameUpload.lastResponse?.saved_output_path && (
+                  <p>
+                    <strong>Saved Output:</strong> {frameUpload.lastResponse.saved_output_path}
+                  </p>
+                )}
                 {frameUpload.lastUploadAt && (
                   <p>
                     <strong>Last Upload:</strong>{' '}
@@ -735,57 +879,95 @@ export function SessionCameraCapturePage(): JSX.Element {
         </article>
 
         <article className="panel">
-          <h2>Annotated Preview</h2>
-          {annotatedImage ? (
-            <>
-              <img src={annotatedImage} alt="Annotated frame" style={{ width: '100%', borderRadius: '8px' }} />
-              {outputFrame && (
-                <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <p className="muted" style={{ margin: 0 }}>
-                    {outputFrame.filename} — {outputIndex + 1} / {outputFrame.total}
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={() => void loadOutputFrame(outputIndex - 1)}
-                      disabled={outputIndex <= 0 || outputLoading}
-                    >
-                      <ChevronLeft size={14} /> Prev
-                    </button>
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={handleAutoPlay}
-                      disabled={!batchResult || batchResult.processed === 0}
-                    >
-                      {autoPlayTimerRef.current ? '⏸ Pause' : '▶ Play All'}
-                    </button>
-                    <button
-                      className="btn btn-sm btn-outline"
-                      onClick={() => void loadOutputFrame(outputIndex + 1)}
-                      disabled={!outputFrame.has_next || outputLoading}
-                    >
-                      Next <ChevronRight size={14} />
-                    </button>
-                  </div>
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ margin: 0 }}>Annotated Preview</h2>
+            {featuredImage && (
+              <span className="timestamp muted" style={{ fontSize: '12px' }}>
+                Last detected: {featuredImage.timestamp.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+
+          <div className="preview-container">
+            {featuredImage ? (
+              <div className="featured-view" style={{ marginBottom: '1.5rem' }}>
+                <img 
+                  src={featuredImage.url} 
+                  alt="Annotated Preview" 
+                  style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
+                />
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span className="count-badge" style={{ backgroundColor: '#4a90e2', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px' }}>
+                    {featuredImage.detections.length} Detections
+                  </span>
                 </div>
-              )}
-            </>
-          ) : (
-            <div
-              style={{
-                width: '100%',
-                aspectRatio: '16/9',
-                backgroundColor: '#f0f0f0',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#999',
-              }}
-            >
-              {batchProcessing ? 'Processing frames through YOLO...' : 'No preview available yet'}
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: '100%',
+                  aspectRatio: '16/9',
+                  backgroundColor: '#f0f0f0',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#999',
+                  marginBottom: '1.5rem'
+                }}
+              >
+                {batchProcessing ? 'Processing frames through YOLO...' : 'No preview available yet'}
+              </div>
+            )}
+
+            <div className="gallery-section">
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '14px', borderBottom: '1px solid #eee', paddingBottom: '4px' }}>History</h4>
+              <div className="image-gallery" style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(4, 1fr)', 
+                gap: '8px',
+                maxHeight: '300px',
+                overflowY: 'auto',
+                padding: '4px'
+              }}>
+                {galleryImages.map((img, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`gallery-item ${featuredImage?.url === img.url ? 'active' : ''}`}
+                    onClick={() => handleSelectFeatured(img)}
+                    style={{ 
+                      cursor: 'pointer',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                      border: featuredImage?.url === img.url ? '2px solid #4a90e2' : '2px solid transparent',
+                      position: 'relative',
+                      transition: 'transform 0.2s'
+                    }}
+                  >
+                    <img src={img.url} alt={`Frame ${idx}`} style={{ width: '100%', display: 'block' }} />
+                    <div style={{ 
+                      position: 'absolute', 
+                      bottom: 0, 
+                      left: 0, 
+                      right: 0, 
+                      backgroundColor: 'rgba(0,0,0,0.5)', 
+                      color: 'white', 
+                      fontSize: '10px', 
+                      textAlign: 'center',
+                      padding: '2px 0'
+                    }}>
+                      {img.timestamp.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
+                    </div>
+                  </div>
+                ))}
+                {galleryImages.length === 0 && (
+                  <div className="empty-gallery muted" style={{ gridColumn: 'span 4', textAlign: 'center', padding: '20px', fontSize: '13px' }}>
+                    No frames captured yet
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </article>
       </section>
 
@@ -942,6 +1124,36 @@ export function SessionCameraCapturePage(): JSX.Element {
           <p className="muted">No behavior logs yet.</p>
         )}
       </section>
+      {/* Diagnostic Log Monitor */}
+      <div className="diagnostic-log-monitor panel">
+        <div className="monitor-header">
+          <Activity size={16} />
+          <h3>Live Diagnostic Logs</h3>
+          <button 
+            className="btn btn-sm btn-text" 
+            onClick={() => setDiagnosticLogs([])}
+            style={{ marginLeft: 'auto' }}
+          >
+            Clear
+          </button>
+        </div>
+        <div className="monitor-body">
+          {diagnosticLogs.length === 0 ? (
+            <div className="empty-log">No logs captured yet. Click "Start Uploading" or "Test Capture".</div>
+          ) : (
+            diagnosticLogs.map(log => {
+              const safeLevel = (log.level || 'INFO').toUpperCase();
+              return (
+                <div key={log.id} className={`log-entry log-${safeLevel.toLowerCase()}`}>
+                  <span className="log-time">{log.time.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                  <span className="log-level">[{safeLevel}]</span>
+                  <span className="log-msg">{log.message}</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </main>
   )
 }

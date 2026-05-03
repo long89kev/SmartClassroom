@@ -669,14 +669,14 @@ ON CONFLICT (device_type_code) DO UPDATE SET
 -- Group-level polling interval defaults (fallback chain starts here)
 INSERT INTO refresh_interval_settings (id, scope_type, scope_id, mode, interval_ms, updated_by, created_at, updated_at)
 VALUES
-  (gen_random_uuid(), 'GROUP', 'A', 'NORMAL', 30000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'A', 'TESTING', 2000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'B', 'NORMAL', 30000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'B', 'TESTING', 2000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'C', 'NORMAL', 30000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'C', 'TESTING', 2000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'LABS', 'NORMAL', 30000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'LABS', 'TESTING', 2000, NULL, NOW(), NOW())
+  (gen_random_uuid(), 'GROUP', 'A', 'NORMAL', 10000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'A', 'TESTING', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'B', 'NORMAL', 10000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'B', 'TESTING', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'C', 'NORMAL', 10000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'C', 'TESTING', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'LABS', 'NORMAL', 10000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'LABS', 'TESTING', 3000, NULL, NOW(), NOW())
 ON CONFLICT (scope_type, scope_id, mode) DO UPDATE SET
   interval_ms = EXCLUDED.interval_ms,
   updated_at = NOW();

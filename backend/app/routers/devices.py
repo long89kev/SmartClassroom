@@ -21,7 +21,7 @@ from app.schemas.common import (
     DeviceTypeResponse,
     ThresholdUpdatePayload,
 )
-from app.routers.auth import get_current_user, get_user_permissions
+from app.routers.auth import get_current_user, get_user_permissions, is_superuser
 import uuid
 
 router = APIRouter(prefix="/api", tags=["Device Management"])
@@ -35,6 +35,8 @@ ALLOWED_TOGGLE_ROLES = {"ACADEMIC_MANAGER", "FACILITY_STAFF", "INSTRUCTOR"}
 
 def _require_mutation_role(current_user: User) -> None:
     """Verify user has role required for device mutations"""
+    if is_superuser(current_user):
+        return
     if current_user.role not in ALLOWED_MUTATION_ROLES:
         raise HTTPException(
             status_code=403,
@@ -61,6 +63,8 @@ def _require_mutation_permission(current_user: User, db: Session) -> None:
 
 def _require_toggle_role(current_user: User) -> None:
     """Verify user has role required for device toggles."""
+    if is_superuser(current_user):
+        return
     if current_user.role not in ALLOWED_TOGGLE_ROLES:
         raise HTTPException(
             status_code=403,

@@ -11,12 +11,14 @@ from app.schemas.common import (
     RoomResponse, RoomCreate,
     RoomDetailResponse, DeviceStateResponse
 )
-from app.routers.auth import get_current_user, get_user_permissions
+from app.routers.auth import get_current_user, get_user_permissions, is_superuser
 
 router = APIRouter(prefix="/api", tags=["Buildings & Navigation"])
 
 
 def _ensure_building_mutation_role(current_user: User) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role != "ACADEMIC_MANAGER":
         raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER can modify building hierarchy")
 

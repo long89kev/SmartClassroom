@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime, time
 from pathlib import Path
 import base64
@@ -19,11 +19,24 @@ from app.schemas.common import (
 from app.routers.auth import get_current_user, get_user_room_scope, get_user_permissions, check_mode_access, is_superuser
 from app.services.grading_engine import PerformanceScorer, RiskDetector
 from app.services.yolo_inference import YOLOInferenceService
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Sessions & AI"])
 
 # Initialize AI services (YOLO only, RiskDetector created per-request)
 yolo_service = YOLOInferenceService()
+
+UNKNOWN_STUDENT_ID = UUID("00000000-0000-0000-0000-000000000000")
+
+def _safe_uuid(val: Any) -> UUID:
+    if isinstance(val, UUID):
+        return val
+    try:
+        return UUID(str(val))
+    except (ValueError, TypeError):
+        return UNKNOWN_STUDENT_ID
 
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
@@ -64,6 +77,37 @@ def _resolve_image_mime(file_path: Path) -> str:
     return "application/octet-stream"
 
 
+def _serialize_frame_snapshot(frame_snapshot: object) -> Optional[str]:
+    if frame_snapshot is None:
+        return None
+
+    if isinstance(frame_snapshot, memoryview):
+        frame_snapshot = frame_snapshot.tobytes()
+
+    if isinstance(frame_snapshot, bytearray):
+        frame_snapshot = bytes(frame_snapshot)
+
+    if isinstance(frame_snapshot, bytes):
+        try:
+            return frame_snapshot.decode("utf-8")
+        except UnicodeDecodeError:
+            if frame_snapshot.startswith(b"\x89PNG\r\n\x1a\n"):
+                mime = "image/png"
+            elif frame_snapshot.startswith(b"\xff\xd8\xff"):
+                mime = "image/jpeg"
+            elif frame_snapshot.startswith(b"GIF87a") or frame_snapshot.startswith(b"GIF89a"):
+                mime = "image/gif"
+            elif frame_snapshot.startswith(b"RIFF") and frame_snapshot[8:12] == b"WEBP":
+                mime = "image/webp"
+            else:
+                mime = "application/octet-stream"
+
+            encoded = base64.b64encode(frame_snapshot).decode("ascii")
+            return f"data:{mime};base64,{encoded}"
+
+    return str(frame_snapshot)
+
+
 def _ensure_session_role(current_user: User, allowed_roles: set[str]) -> None:
     if is_superuser(current_user):
         return
@@ -79,7 +123,7 @@ def _ensure_room_scope(current_user: User, room_id: UUID, db: Session) -> None:
     if current_user.role == "ACADEMIC_MANAGER":
         return
 
-    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
+    if current_user.role == "INSTRUCTOR":
         allowed_rooms = set(get_user_room_scope(current_user, db))
         if room_id not in allowed_rooms:
             raise HTTPException(status_code=403, detail="User not assigned to this room")
@@ -191,7 +235,7 @@ async def create_session(
     db: Session = Depends(get_db)
 ):
     """Start a new class session (NORMAL or TESTING mode)"""
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_session_permissions(current_user, db, {"mode:switch_learning", "mode:switch_testing"})
 
     # Validate room, teacher, subject exist
@@ -254,7 +298,7 @@ async def list_sessions(
 
     query = db.query(ClassSession)
 
-    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
+    if current_user.role == "INSTRUCTOR":
         allowed_rooms = get_user_room_scope(current_user, db)
         query = query.filter(ClassSession.room_id.in_(allowed_rooms if allowed_rooms else [UUID("00000000-0000-0000-0000-000000000000")]))
 
@@ -308,7 +352,7 @@ async def get_tutor_room_context(
     )
 
     # For INSTRUCTOR roles, use room assignments; for superuser/ACADEMIC_MANAGER, find any active session
-    if current_user.role not in {"INSTRUCTOR", "INSTRUCTOR"} and not is_superuser(current_user) and current_user.role != "ACADEMIC_MANAGER":
+    if not is_superuser(current_user) and current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER"}:
         raise HTTPException(status_code=403, detail="Role cannot resolve room context")
 
     # Superuser / ACADEMIC_MANAGER: find the most recent active session across all rooms
@@ -468,13 +512,13 @@ async def get_current_session_target(
         {"dashboard:view_classroom", "dashboard:view_block", "dashboard:view_university", "dashboard:view_minimal"},
     )
 
-    if current_user.role not in {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"}:
+    if not is_superuser(current_user) and current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER"}:
         raise HTTPException(status_code=403, detail="Role cannot resolve session target")
 
     room_scope = get_user_room_scope(current_user, db)
     scoped_query = db.query(ClassSession).filter(ClassSession.status == "ACTIVE")
 
-    if current_user.role in {"INSTRUCTOR", "INSTRUCTOR"}:
+    if current_user.role == "INSTRUCTOR" and not is_superuser(current_user):
         if not room_scope:
             return {
                 "session_id": None,
@@ -588,7 +632,7 @@ async def change_session_mode(
     db: Session = Depends(get_db)
 ):
     """Switch session between NORMAL and TESTING mode"""
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
@@ -640,7 +684,7 @@ async def ingest_learning_mode(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
     
     if session.status != "ACTIVE":
@@ -662,7 +706,9 @@ async def ingest_learning_mode(
 
         # Resolve output directory for annotated images
         settings = get_settings()
-        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir) if behavior.source_filename else None
+        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
+        source_filename = behavior.source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+        logger.debug("[API] /sessions/%s/learn payload len=%d source_filename=%s", session_id, len(behavior.image_base64 or ""), source_filename)
 
         # Run YOLO inference on image
         frame_result = yolo_service.process_frame(
@@ -671,17 +717,27 @@ async def ingest_learning_mode(
             student_id=behavior.student_id,
             mode="LEARNING",
             output_dir=output_dir,
-            source_filename=behavior.source_filename,
+            source_filename=source_filename,
         )
+        logger.info("[API] process_frame done for session %s: detection_count=%s saved_output_path=%s", session_id, frame_result.get('detection_count'), frame_result.get('saved_output_path'))
         
         # Store detections as behavior logs
         detections = frame_result["detections"]
-        stored_detections = []
         
+        # Prepare snapshot bytes for storage (standardize to bytes instead of base64 string)
+        snapshot_bytes = None
+        if behavior.image_base64:
+            try:
+                b64_str = behavior.image_base64
+                if "," in b64_str:
+                    b64_str = b64_str.split(",")[1]
+                snapshot_bytes = base64.b64decode(b64_str)
+            except Exception as e:
+                logger.warning("Failed to decode snapshot for storage: %s", e)
+
+        stored_detections = []
         for detection in detections:
-            student_id = detection.get("student_id", behavior.student_id)
-            if not student_id:
-                continue
+            student_id = _safe_uuid(detection.get("student_id", behavior.student_id))
             
             log = BehaviorLog(
                 session_id=session_id,
@@ -690,7 +746,7 @@ async def ingest_learning_mode(
                 behavior_class=detection["behavior_class"],
                 count=1,
                 duration_seconds=0,
-                frame_snapshot=behavior.image_base64,
+                frame_snapshot=snapshot_bytes,
                 yolo_confidence=detection["confidence"],
                 detected_at=datetime.utcnow()
             )
@@ -703,8 +759,8 @@ async def ingest_learning_mode(
         performance_scorer = PerformanceScorer(db)
         analyzed_students = []
         
-        # Get unique students in detections
-        unique_students = set(d.get("student_id", behavior.student_id) for d in detections if d.get("student_id") or behavior.student_id)
+        # Get unique students in detections (ensure they are UUIDs)
+        unique_students = set(_safe_uuid(d.get("student_id", behavior.student_id)) for d in detections if d.get("student_id") or behavior.student_id)
         
         for student_id in unique_students:
             perf_score = performance_scorer.calculate_performance(
@@ -737,6 +793,7 @@ async def ingest_learning_mode(
         )
     
     except Exception as e:
+        logger.exception("[API] Learning mode processing failed for session %s", session_id)
         raise HTTPException(status_code=400, detail=f"Learning mode processing failed: {str(e)}")
 
 # =============================================================================
@@ -763,7 +820,7 @@ async def ingest_testing_mode(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
 
     if not check_mode_access(current_user, "TESTING", db):
@@ -788,7 +845,10 @@ async def ingest_testing_mode(
         
         # Resolve output directory for annotated images
         settings = get_settings()
-        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir) if behavior.source_filename else None
+        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
+        source_filename = behavior.source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+
+        logger.debug("[API] /sessions/%s/test payload len=%d source_filename=%s", session_id, len(behavior.image_base64 or ""), source_filename)
 
         # Run YOLO inference on image
         frame_result = yolo_service.process_frame(
@@ -797,17 +857,27 @@ async def ingest_testing_mode(
             student_id=None,  # Will be assigned from face detection
             mode="TESTING",
             output_dir=output_dir,
-            source_filename=behavior.source_filename,
+            source_filename=source_filename,
         )
+        logger.info("[API] process_frame done for session %s: detection_count=%s saved_output_path=%s", session_id, frame_result.get('detection_count'), frame_result.get('saved_output_path'))
         
         # Store detection logs (skip if no valid student_id)
         detections = frame_result["detections"]
         room_id = session.room_id
         
+        # Prepare snapshot bytes for storage
+        snapshot_bytes = None
+        if behavior.image_base64:
+            try:
+                b64_str = behavior.image_base64
+                if "," in b64_str:
+                    b64_str = b64_str.split(",")[1]
+                snapshot_bytes = base64.b64decode(b64_str)
+            except Exception as e:
+                logger.warning("Failed to decode snapshot for storage: %s", e)
+        
         for detection in detections:
-            student_id = detection.get("student_id")
-            if not student_id:
-                continue  # Skip detections without valid student_id
+            student_id = _safe_uuid(detection.get("student_id"))
             
             log = BehaviorLog(
                 session_id=session_id,
@@ -816,7 +886,7 @@ async def ingest_testing_mode(
                 behavior_class=detection["behavior_class"],
                 count=1,
                 duration_seconds=0,
-                frame_snapshot=behavior.image_base64,
+                frame_snapshot=snapshot_bytes,
                 yolo_confidence=detection["confidence"],
                 detected_at=datetime.utcnow()
             )
@@ -857,6 +927,7 @@ async def ingest_testing_mode(
         )
     
     except Exception as e:
+        logger.exception("[API] Testing mode processing failed for session %s", session_id)
         raise HTTPException(status_code=400, detail=f"Testing mode processing failed: {str(e)}")
 
 # =============================================================================
@@ -877,7 +948,7 @@ async def ingest_behavior(
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_room_scope(current_user, session.room_id, db)
     
     if session.status != "ACTIVE":
@@ -1317,7 +1388,7 @@ async def get_session_behavior_logs(
                 "duration_seconds": log.duration_seconds,
                 "yolo_confidence": log.yolo_confidence,
                 "detected_at": log.detected_at,
-                "frame_snapshot": log.frame_snapshot.decode("utf-8") if isinstance(log.frame_snapshot, bytes) else str(log.frame_snapshot) if log.frame_snapshot else None,
+                "frame_snapshot": _serialize_frame_snapshot(log.frame_snapshot),
             }
             for log in logs
         ]
@@ -1330,7 +1401,7 @@ async def end_session(
     db: Session = Depends(get_db)
 ):
     """End session and calculate final scores"""
-    _ensure_session_role(current_user, {"INSTRUCTOR", "INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
     _ensure_session_permissions(current_user, db, {"mode:switch_learning", "mode:switch_testing"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()

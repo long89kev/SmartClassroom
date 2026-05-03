@@ -93,7 +93,7 @@ async def list_all_incidents(
     
     incidents = query.order_by(RiskIncident.flagged_at.desc()).all()
 
-    if current_user.role in {"INSTRUCTOR"}:
+    if current_user.role == "INSTRUCTOR" and not is_superuser(current_user):
         assigned_rooms = set(get_user_room_scope(current_user, db))
         incidents = [
             incident

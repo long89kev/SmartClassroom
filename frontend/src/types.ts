@@ -519,6 +519,7 @@ export interface LearningModeResponse {
   detections: BehaviorDetection[]
   annotated_image_base64: string
   detection_count: number
+  saved_output_path?: string | null
   students_analyzed: Array<{
     student_id: string
     performance_score: number
@@ -531,6 +532,7 @@ export interface TestingModeResponse {
   detections: BehaviorDetection[]
   annotated_image_base64: string
   detection_count: number
+  saved_output_path?: string | null
   risk_analysis: Record<
     string,
     {

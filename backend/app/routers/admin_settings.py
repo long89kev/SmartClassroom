@@ -7,14 +7,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Building, RefreshIntervalSetting, Room, User
-from app.routers.auth import get_current_user, get_user_permissions
+from app.routers.auth import get_current_user, get_user_permissions, is_superuser
 
 router = APIRouter(prefix="/api", tags=["Admin Settings"])
 
 GROUP_KEYS = {"A", "B", "C", "LABS"}
 SCOPE_TYPES = {"GROUP", "BUILDING", "ROOM"}
 MODES = {"NORMAL", "TESTING"}
-FALLBACK_INTERVALS = {"NORMAL": 30000, "TESTING": 2000}
+FALLBACK_INTERVALS = {
+    "NORMAL": 10000,   # 10 seconds (Learning mode)
+    "TESTING": 3000,   # 3 seconds (Testing mode)
+}
 MIN_INTERVAL_MS = 1000
 MAX_INTERVAL_MS = 120000
 
@@ -24,6 +27,8 @@ class IntervalUpdatePayload(BaseModel):
 
 
 def _ensure_admin_settings_access(current_user: User, db: Session) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role != "ACADEMIC_MANAGER":
         raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER can update refresh interval settings")
 
@@ -33,6 +38,8 @@ def _ensure_admin_settings_access(current_user: User, db: Session) -> None:
 
 
 def _ensure_dashboard_view_access(current_user: User, db: Session) -> None:
+    if is_superuser(current_user):
+        return
     user_permissions = get_user_permissions(current_user, db)
     required = {
         "dashboard:view_classroom",

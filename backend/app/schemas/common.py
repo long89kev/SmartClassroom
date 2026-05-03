@@ -108,6 +108,7 @@ class BehaviorDetectionResponse(BaseModel):
     detections: List[dict]  # [{behavior_class, confidence, student_id}, ...]
     annotated_image_base64: str  # Image with bounding boxes
     detection_count: int
+    saved_output_path: Optional[str] = None
 
 class LearningModeResponse(BehaviorDetectionResponse):
     """Learning mode specific response with performance score"""

@@ -4,7 +4,7 @@ import { Camera, CameraOff, AlertCircle } from 'lucide-react'
 type CameraState = 'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'ERROR'
 
 export interface CameraIngestPanelHandle {
-  startCamera: () => Promise<void>
+  startCamera: () => Promise<CameraState>
   stopCamera: () => void
   captureFrame: () => string | null
   getState: () => CameraState
@@ -20,6 +20,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const readyRef = useRef(false)
   const [state, setState] = useState<CameraState>('IDLE')
   const [error, setError] = useState<string | null>(null)
 
@@ -28,11 +29,12 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
     onStateChange?.(newState)
   }
 
-  const startCamera = async (): Promise<void> => {
-    if (state !== 'IDLE') return
+  const startCamera = async (): Promise<CameraState> => {
+    if (state !== 'IDLE') return state
 
     updateState('STARTING')
     setError(null)
+    readyRef.current = false
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -44,6 +46,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
       })
 
       streamRef.current = stream
+      console.debug('[Camera] startCamera - stream acquired')
 
       const videoElement = videoRef.current
       if (videoElement) {
@@ -58,12 +61,36 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
         })
       }
 
+      // Wait for video dimensions to become non-zero before allowing capture.
+      let attempts = 0
+      while (
+        attempts < 20 &&
+        videoElement !== null &&
+        (videoElement.videoWidth === 0 || videoElement.videoHeight === 0)
+      ) {
+        await new Promise((r) => setTimeout(r, 100))
+        attempts++
+      }
+
+      if (!videoElement || videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+        readyRef.current = false
+        setError('Camera stream is not ready yet. Please try again.')
+        updateState('ERROR')
+        return 'ERROR'
+      }
+
+      readyRef.current = true
+      console.debug('[Camera] ready', { videoWidth: videoElement.videoWidth, videoHeight: videoElement.videoHeight })
       updateState('RUNNING')
+
+      return 'RUNNING'
     } catch (err) {
       const errorMsg =
         err instanceof Error ? err.message : 'Failed to access camera. Check permissions.'
+      console.debug('[Camera] startCamera error', err)
       setError(errorMsg)
       updateState('ERROR')
+      return 'ERROR'
     }
   }
 
@@ -71,6 +98,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
     if (state !== 'RUNNING') return
 
     updateState('STOPPING')
+    readyRef.current = false
 
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop())
@@ -85,26 +113,54 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
   }
 
   const captureFrame = (): string | null => {
-    if (!videoRef.current || !canvasRef.current || state !== 'RUNNING') {
+    const videoElement = videoRef.current
+    const canvasElement = canvasRef.current
+
+    if (!videoElement || !canvasElement || !streamRef.current || !readyRef.current) {
+      console.debug('[Camera] captureFrame - not ready', { 
+        hasVideo: !!videoElement, 
+        hasCanvas: !!canvasElement, 
+        hasStream: !!streamRef.current, 
+        ready: readyRef.current 
+      })
       return null
     }
 
-    const ctx = canvasRef.current.getContext('2d')
-    if (!ctx) return null
+    const ctx = canvasElement.getContext('2d')
+    if (!ctx) {
+      console.error('[Camera] captureFrame - could not get canvas context')
+      return null
+    }
 
-    // Match canvas size to video dimensions
-    canvasRef.current.width = videoRef.current.videoWidth
-    canvasRef.current.height = videoRef.current.videoHeight
+    // Match canvas size to video dimensions - ensure they are valid
+    const width = videoElement.videoWidth
+    const height = videoElement.videoHeight
+    
+    if (width === 0 || height === 0) {
+      console.warn('[Camera] captureFrame - video dimensions are zero')
+      return null
+    }
+
+    canvasElement.width = width
+    canvasElement.height = height
 
     // Draw video frame to canvas
-    ctx.drawImage(videoRef.current, 0, 0)
-
-    // Convert to JPEG data URI (70% quality for smaller payload)
     try {
-      const dataUri = canvasRef.current.toDataURL('image/jpeg', 0.7)
+      ctx.drawImage(videoElement, 0, 0)
+      
+      // Convert to JPEG data URI (70% quality for smaller payload)
+      const dataUri = canvasElement.toDataURL('image/jpeg', 0.7)
+      
+      if (!dataUri || dataUri === 'data:,') {
+        console.warn('[Camera] captureFrame - produced empty data URI')
+        return null
+      }
+
+      console.debug('[Camera] captureFrame - success', { length: dataUri.length })
       onCapture?.(dataUri)
       return dataUri
-    } catch {
+    } catch (err) {
+      console.error('[Camera] captureFrame - error during draw or conversion', err)
       return null
     }
   }
@@ -115,6 +171,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop())
       }
+      readyRef.current = false
     }
   }, [])
 

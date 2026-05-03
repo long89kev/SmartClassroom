@@ -25,6 +25,8 @@ export function useFrameUpload(
   inferenceMode: 'LEARNING' | 'TESTING' | null = null,
   stopOnCaptureFailure: boolean = false,
   getSourceFilename?: () => string | null,
+  onUploadSuccess?: (response: LearningModeResponse | TestingModeResponse) => void,
+  onUploadError?: (errorMessage: string) => void,
 ): UseFrameUploadReturn {
   const [state, setState] = useState<UseFrameUploadState>({
     isUploading: false,
@@ -39,64 +41,53 @@ export function useFrameUpload(
   const mountedRef = useRef(true)
   const isRunningRef = useRef(false)
 
-  const uploadFrame = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current) return
-    if (inFlightRef.current) return
-    if (!sessionId || !session || !intervalMs) return
+  const uploadFrame = useCallback(async (): Promise<boolean> => {
+    if (!sessionId || !intervalMs || !isRunningRef.current) return false
+
+    if (inFlightRef.current) {
+      console.debug('[FrameUpload] Skip - upload already in flight')
+      return false
+    }
 
     inFlightRef.current = true
-
-    const resolvedMode = inferenceMode ?? (session.mode === 'TESTING' ? 'TESTING' : 'LEARNING')
-
-    const stopIfConfigured = () => {
-      if (!stopOnCaptureFailure) return
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-        timerRef.current = null
-      }
-
-      isRunningRef.current = false
-
-      setState((prev) => ({
-        ...prev,
-        isUploading: false,
-      }))
-    }
+    const startTime = Date.now()
+    console.debug('[FrameUpload] Starting upload cycle', { sessionId, mode: inferenceMode })
 
     try {
       const dataUri = await Promise.resolve(captureFrame())
       if (!dataUri) {
-        setState((prev) => ({
-          ...prev,
-          lastError: 'Failed to capture frame',
-        }))
-        stopIfConfigured()
-        inFlightRef.current = false
-        return
+        const errorMsg = 'Capture returned null - camera might not be ready'
+        console.warn('[FrameUpload]', errorMsg)
+        onUploadError?.(errorMsg)
+        setState(prev => ({ ...prev, lastError: errorMsg }))
+        return true // Count as attempted
       }
 
-      // Choose endpoint based on session mode
-      let response: LearningModeResponse | TestingModeResponse
+      console.debug('[FrameUpload] Frame captured, length:', dataUri.length)
 
-      const sourceFilename = getSourceFilename?.() ?? undefined
+      const resolvedMode = inferenceMode ?? (session?.mode === 'TESTING' ? 'TESTING' : 'LEARNING')
+      let response: LearningModeResponse | TestingModeResponse
 
       if (resolvedMode === 'TESTING') {
         response = await ingestTestingMode(sessionId, {
           image_base64: dataUri,
-          students_present: session.students_present,
+          students_present: session?.students_present || [],
           confidence_threshold: confidenceThreshold,
-          source_filename: sourceFilename,
+          source_filename: getSourceFilename?.(),
         })
       } else {
-        // NORMAL mode (learning)
         response = await ingestLearningMode(sessionId, {
           image_base64: dataUri,
           confidence_threshold: confidenceThreshold,
-          source_filename: sourceFilename,
+          source_filename: getSourceFilename?.(),
         })
       }
 
-      if (!mountedRef.current) return
+      const duration = Date.now() - startTime
+      console.debug('[FrameUpload] Upload success', { 
+        duration: `${duration}ms`, 
+        detections: response.detection_count 
+      })
 
       setState((prev) => ({
         ...prev,
@@ -105,67 +96,97 @@ export function useFrameUpload(
         framesUploaded: prev.framesUploaded + 1,
         lastUploadAt: new Date(),
       }))
-    } catch (err) {
-      if (!mountedRef.current) return
 
+      onUploadSuccess?.(response)
+      return true
+    } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Upload failed'
+      console.error('[FrameUpload] Error:', errorMsg)
+      
       setState((prev) => ({
         ...prev,
         lastError: errorMsg,
       }))
-      stopIfConfigured()
+      
+      onUploadError?.(errorMsg)
+      return true
     } finally {
       inFlightRef.current = false
     }
-  }, [sessionId, session, intervalMs, captureFrame, confidenceThreshold, inferenceMode, stopOnCaptureFailure, getSourceFilename])
+  }, [
+    sessionId,
+    session,
+    intervalMs,
+    captureFrame,
+    confidenceThreshold,
+    inferenceMode,
+    getSourceFilename,
+    onUploadSuccess,
+    onUploadError,
+  ])
 
   const scheduleNextUpload = useCallback((): void => {
-    if (!mountedRef.current || !intervalMs) return
+    if (!mountedRef.current || !intervalMs || !isRunningRef.current) return
 
     if (timerRef.current) {
       clearTimeout(timerRef.current)
     }
 
-    timerRef.current = setTimeout(() => {
+    console.debug(`[FrameUpload] Scheduling next capture in ${intervalMs}ms`)
+    timerRef.current = setTimeout(async () => {
       if (!mountedRef.current || !isRunningRef.current) return
-      void uploadFrame().finally(() => {
-        if (mountedRef.current && isRunningRef.current) {
-          scheduleNextUpload()
-        }
-      })
+      
+      await uploadFrame()
+      
+      if (mountedRef.current && isRunningRef.current) {
+        scheduleNextUpload()
+      }
     }, intervalMs)
   }, [intervalMs, uploadFrame])
 
   // Re-schedule when interval changes
   useEffect(() => {
     if (isRunningRef.current) {
+      console.debug('[FrameUpload] Context changed, re-scheduling loop')
       scheduleNextUpload()
     }
 
     return () => {
       if (timerRef.current) {
         clearTimeout(timerRef.current)
+        timerRef.current = null
       }
     }
   }, [intervalMs, scheduleNextUpload])
 
   const startUploading = useCallback((): void => {
-    if (!mountedRef.current || !sessionId || !intervalMs) return
+    if (!mountedRef.current || !sessionId || !intervalMs) {
+      console.warn('[FrameUpload] Cannot start - missing requirements', { 
+        mounted: mountedRef.current, 
+        hasSession: !!sessionId, 
+        interval: intervalMs 
+      })
+      return
+    }
 
+    if (isRunningRef.current) return
+
+    console.info('[FrameUpload] Starting capture loop')
     isRunningRef.current = true
 
     setState((prev) => ({
       ...prev,
       isUploading: true,
+      lastError: null,
     }))
 
     // Initial upload
-    void uploadFrame().finally(() => {
+    void uploadFrame().then(() => {
       if (mountedRef.current && isRunningRef.current) {
         scheduleNextUpload()
       }
     })
-  }, [sessionId, intervalMs, uploadFrame])
+  }, [sessionId, intervalMs, uploadFrame, scheduleNextUpload])
 
   const stopUploading = useCallback((): void => {
     if (timerRef.current) {
@@ -196,6 +217,7 @@ export function useFrameUpload(
 
   // Cleanup on unmount
   useEffect(() => {
+    mountedRef.current = true
     return () => {
       mountedRef.current = false
       isRunningRef.current = false

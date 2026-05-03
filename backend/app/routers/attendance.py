@@ -142,7 +142,7 @@ def _ensure_attendance_role(current_user: User) -> None:
 def _ensure_attendance_dashboard_role(current_user: User) -> None:
     if is_superuser(current_user):
         return
-    if current_user.role not in {"ACADEMIC_MANAGER", "ACADEMIC_MANAGER", "FACILITY_STAFF", "INSTRUCTOR"}:
+    if current_user.role not in {"ACADEMIC_MANAGER", "FACILITY_STAFF", "INSTRUCTOR"}:
         raise HTTPException(status_code=403, detail="Insufficient role for school-wide attendance dashboard")
 
 
@@ -1247,7 +1247,7 @@ async def ingest_attendance_event(
     Called by the PC attendance service (USB webcam face recognition).
     Accepts INSTRUCTOR, ACADEMIC_MANAGER, or INSTRUCTOR roles.
     """
-    if current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER", "INSTRUCTOR"}:
+    if not is_superuser(current_user) and current_user.role not in {"INSTRUCTOR", "ACADEMIC_MANAGER"}:
         raise HTTPException(status_code=403, detail="Insufficient role for attendance ingest")
 
     session = _get_session_or_404(db, session_id)

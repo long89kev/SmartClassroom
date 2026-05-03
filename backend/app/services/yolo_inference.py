@@ -560,6 +560,7 @@ class YOLOInferenceService:
             }
         """
         try:
+            logger.debug("[YOLO] process_frame start mode=%s student_id=%s output_dir=%s source_filename=%s", mode, student_id, output_dir, source_filename)
             # Decode
             image = self.decode_base64_image(image_base64)
             active_mode = self._get_active_mode(mode, student_id)
@@ -587,10 +588,11 @@ class YOLOInferenceService:
                         annotated_image, output_dir, source_filename
                     )
                 except Exception as save_err:
-                    logger.warning("Failed to save annotated image: %s", save_err)
+                    logger.exception("Failed to save annotated image")
             
             # Encode
             annotated_base64 = self.encode_image_to_base64(annotated_image)
+            logger.debug("[YOLO] process_frame complete: detections=%d saved_path=%s", len(detections), saved_path)
             
             return {
                 "detections": detections,

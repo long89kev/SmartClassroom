@@ -308,7 +308,7 @@ async def create_user(
     db: Session = Depends(get_db)
 ):
     """Create new user (system admin only)"""
-    if current_user.role != "ACADEMIC_MANAGER":
+    if current_user.role != "ACADEMIC_MANAGER" and not is_superuser(current_user):
         raise HTTPException(status_code=403, detail="Only system admins can create users")
     
     # Check if username exists
@@ -350,7 +350,7 @@ async def get_user(
     db: Session = Depends(get_db)
 ):
     """Get user info"""
-    if current_user.role != "ACADEMIC_MANAGER" and current_user.id != user_id:
+    if current_user.role != "ACADEMIC_MANAGER" and current_user.id != user_id and not is_superuser(current_user):
         raise HTTPException(status_code=403, detail="Unauthorized")
     
     user = db.query(User).filter(User.id == user_id).first()

@@ -49,7 +49,7 @@ import type {
 
 export const api = axios.create({
   baseURL: '/api',
-  timeout: 12000,
+  timeout: 30000,
 })
 
 let requestInterceptorId: number | null = null
@@ -65,19 +65,33 @@ export function setupApiInterceptors(getToken: () => string | null, onUnauthoriz
   }
 
   requestInterceptorId = api.interceptors.request.use((config) => {
+    // attach start time for duration logging
+    ;(config as any).metadata = { startTime: Date.now() }
     const token = getToken()
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    if (config.url?.includes('/sessions/')) {
+      console.debug('[API request]', config.method, config.url)
     }
     return config
   })
 
   responseInterceptorId = api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+      try {
+        const start = (response.config as any).metadata?.startTime
+        if (response.config.url?.includes('/sessions/')) {
+          console.debug('[API response]', response.status, response.config.url, 'duration', start ? Date.now() - start : 'n/a', Object.keys(response.data || {}))
+        }
+      } catch {}
+      return response
+    },
     (error: AxiosError) => {
       if (error.response?.status === 401) {
         onUnauthorized()
       }
+      console.debug('[API error]', error.config?.url, error.response?.status, error.response?.data)
       return Promise.reject(error)
     },
   )

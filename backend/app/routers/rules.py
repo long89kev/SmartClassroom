@@ -8,12 +8,14 @@ from datetime import datetime
 from app.database import get_db
 from app.models import IoTRule, Room, Floor, Building, User
 from app.schemas.common import IoTRuleCreate, IoTRuleUpdate, IoTRuleResponse
-from app.routers.auth import get_current_user, get_user_permissions
+from app.routers.auth import get_current_user, get_user_permissions, is_superuser
 
 router = APIRouter(prefix="/api", tags=["IoT Auto-Rules"])
 
 
 def _ensure_rule_mutation_role(current_user: User) -> None:
+    if is_superuser(current_user):
+        return
     if current_user.role not in {"ACADEMIC_MANAGER", "FACILITY_STAFF"}:
         raise HTTPException(status_code=403, detail="Only ACADEMIC_MANAGER or FACILITY_STAFF can modify rules")
 
