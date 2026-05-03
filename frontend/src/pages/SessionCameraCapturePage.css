@@ -1,3 +1,10 @@
+.capture-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+}
+
 .camera-panel {
   display: flex;
   flex-direction: column;
@@ -209,10 +216,11 @@ tbody tr:hover {
   margin-bottom: 16px;
 }
 
-.content-grid-two {
+.capture-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  margin-top: 16px;
   margin-bottom: 16px;
 }
 

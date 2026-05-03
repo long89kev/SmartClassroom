@@ -24,7 +24,7 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [, setAnnotatedImage] = useState<string | null>(null)
   const [lastDetections, setLastDetections] = useState<any[]>([])
 
-  const [captureSource, setCaptureSource] = useState<'LIVE' | 'TEMP' | 'UPLOAD'>('LIVE')
+  const [captureSource, setCaptureSource] = useState<'LIVE' | 'UPLOAD'>('LIVE')
   const [inferenceMode, setInferenceMode] = useState<'LEARNING' | 'TESTING'>('LEARNING')
   const [tempIndex, setTempIndex] = useState(0)
   const [tempTotal, setTempTotal] = useState(0)
@@ -593,7 +593,7 @@ export function SessionCameraCapturePage(): JSX.Element {
 
   if (!sessionId) {
     return (
-      <main className="page">
+      <main className="capture-page">
         <section className="panel error-panel">Missing session id in route.</section>
       </main>
     )
@@ -601,7 +601,7 @@ export function SessionCameraCapturePage(): JSX.Element {
 
   if (loading) {
     return (
-      <main className="page">
+      <main className="capture-page">
         <section className="panel">Loading session details...</section>
       </main>
     )
@@ -609,7 +609,7 @@ export function SessionCameraCapturePage(): JSX.Element {
 
   if (error) {
     return (
-      <main className="page">
+      <main className="capture-page">
         <section className="panel error-panel">
           <AlertCircle size={18} />
           <p>{error}</p>
@@ -620,7 +620,7 @@ export function SessionCameraCapturePage(): JSX.Element {
 
   if (!session) {
     return (
-      <main className="page">
+      <main className="capture-page">
         <section className="panel error-panel">Session not found.</section>
       </main>
     )
@@ -629,7 +629,7 @@ export function SessionCameraCapturePage(): JSX.Element {
   const logsPerPage = 20
 
   return (
-    <main className="page campus-bg">
+    <main className="capture-page campus-bg">
       <section className="panel">
 
         <h1>Camera Capture & Inference</h1>
@@ -682,7 +682,7 @@ export function SessionCameraCapturePage(): JSX.Element {
         )}
       </section>
 
-      <section className="content-grid-two">
+      <section className="capture-grid">
         <article className="panel">
           <h2>Capture Source</h2>
 
@@ -696,13 +696,6 @@ export function SessionCameraCapturePage(): JSX.Element {
                   disabled={frameUpload.isUploading}
                 >
                   Live Camera
-                </button>
-                <button
-                  className={`btn btn-sm ${captureSource === 'TEMP' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setCaptureSource('TEMP')}
-                  disabled={frameUpload.isUploading}
-                >
-                  Temp Replay
                 </button>
                 <button
                   className={`btn btn-sm ${captureSource === 'UPLOAD' ? 'btn-primary' : 'btn-outline'}`}
@@ -737,17 +730,6 @@ export function SessionCameraCapturePage(): JSX.Element {
 
           {captureSource === 'LIVE' ? (
             <CameraIngestPanel ref={cameraRef} onStateChange={setCameraState} />
-          ) : captureSource === 'TEMP' ? (
-            <div className="temp-replay-panel">
-              <p className="muted">Streaming frames from backend/app/services/Temp.</p>
-              <p>
-                <strong>Frame:</strong>{' '}
-                {tempTotal > 0 ? `${tempIndex + 1} / ${tempTotal}` : 'Waiting for frames'}
-              </p>
-              <p>
-                <strong>Filename:</strong> {tempFilename ?? '-'}
-              </p>
-            </div>
           ) : (
             <div className="upload-panel">
               <p className="muted" style={{ marginBottom: '12px' }}>
@@ -780,21 +762,7 @@ export function SessionCameraCapturePage(): JSX.Element {
           )}
 
           <div style={{ marginTop: '12px' }}>
-            {captureSource === 'TEMP' ? (
-              /* Temp Replay: Use batch inference directly */
-              <button
-                className="btn btn-primary"
-                onClick={handleStartBatchInference}
-                disabled={batchProcessing}
-                style={{ width: '100%' }}
-              >
-                {batchProcessing ? (
-                  <><RefreshCw size={16} className="spin" /> Processing all frames...</>
-                ) : (
-                  <><Play size={16} /> Start Replay</>
-                )}
-              </button>
-            ) : captureSource === 'UPLOAD' ? (
+            {captureSource === 'UPLOAD' ? (
               /* Upload Image: Use the single upload endpoint */
               <button
                 className="btn btn-primary"
