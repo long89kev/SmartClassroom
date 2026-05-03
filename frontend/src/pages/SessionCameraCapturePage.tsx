@@ -633,7 +633,7 @@ export function SessionCameraCapturePage(): JSX.Element {
       <section className="panel">
 
         <h1>Camera Capture & Inference</h1>
-        <p className="muted">Session: {sessionId}</p>
+        <p className="muted">Session: {sessionId.split('-')[0].toUpperCase()}</p>
 
         {intervalError && (
           <div className="error-panel">
