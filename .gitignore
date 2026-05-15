@@ -32,7 +32,7 @@ embedded/esp32_cam/build/
 *.elf
 *.bin
 *.map
-
+SCB
 # Mosquitto data
 mosquitto/data/
 mosquitto/log/

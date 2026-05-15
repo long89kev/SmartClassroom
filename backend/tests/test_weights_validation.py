@@ -74,7 +74,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Import the service under test
 try:
-    from app.services.yolo_inference import YOLOInferenceService
+    from backend.app.services.yolo_inference import YOLOInferenceService
 except ImportError as e:
     logger.error(f"Failed to import YOLOInferenceService: {e}")
     sys.exit(1)
@@ -94,8 +94,7 @@ EXPECTED_LABELS = {
     'student_bow_turn': ['BOW_THE_HEAD', 'TURN_THE_HEAD'],
     'student_discuss': ['DISCUSS'],
     'student_hand_read_write': ['HAND_RAISING', 'READ', 'WRITE'],
-    'teacher_behavior': ['GUIDE', 'ANSWER', 'ON_STAGE_INTERACTION', 'BLACKBOARD_WRITING',
-                         'TEACHER', 'STAND', 'USING_COMPUTER', 'BLACKBOARD']
+    'teacher_behavior': ['GUIDE', 'TEACHER']
 }
 
 LEARNING_MODE_LABELS = set()

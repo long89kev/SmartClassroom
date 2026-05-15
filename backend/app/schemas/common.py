@@ -742,3 +742,5 @@ class UploadAnalyzeResponse(BaseModel):
     annotated_image_base64: Optional[str] = None
     detections: List[Dict[str, Any]] = []
     logs_created: int = 0
+    incidents_created: int = 0
+    risk_summary: Optional[Dict[str, Any]] = None

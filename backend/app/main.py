@@ -65,9 +65,9 @@ async def startup_event():
         yolo_service = YOLOInferenceService()
         if yolo_service.is_ready():
             logger.info("✓ YOLO Model: LOADED")
-            logger.info("  - Model: YOLOv8")
-            logger.info("  - Path: /app/models/yolo_weights/best.pt")
-            logger.info("  - Features: Behavior detection, cheat detection")
+            logger.info("  - Model: YOLO26")
+            logger.info("  - Path: /app/models/yolo_weights/.../best.pt")
+            logger.info("  - Features: Behavior detection")
         else:
             logger.warning("✗ YOLO Model: FAILED TO LOAD")
             logger.warning("  - Continuing without YOLO")

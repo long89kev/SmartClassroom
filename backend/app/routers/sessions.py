@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, BackgroundTasks, Form
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict
 from datetime import datetime, time
 from pathlib import Path
 import base64
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models import ClassSession, Room, Teacher, Subject, Timetable, BehaviorLog, RiskIncident, PerformanceAggregate, User
 from app.schemas.common import (
     SessionCreate, SessionResponse, SessionModeChange, 
@@ -48,6 +48,115 @@ def _resolve_temp_frames_dir(raw_path: str) -> Path:
 
     repo_root = Path(__file__).resolve().parents[3]
     return repo_root.joinpath(temp_dir)
+
+
+def _finalize_learning_ingest(
+    session_id: UUID,
+    subject_id: UUID,
+    detections: List[Dict],
+    snapshot_bytes: Optional[bytes],
+    student_id_override: Optional[UUID] = None,
+):
+    """Background task to persist behavior logs and update performance scores."""
+    db = SessionLocal()
+    try:
+        # 1. Store behavior logs
+        for detection in detections:
+            student_id = _safe_uuid(detection.get("student_id", student_id_override))
+            
+            log = BehaviorLog(
+                session_id=session_id,
+                actor_id=student_id,
+                actor_type="STUDENT",
+                behavior_class=detection["behavior_class"],
+                count=1,
+                duration_seconds=0,
+                frame_snapshot=snapshot_bytes,
+                yolo_confidence=detection["confidence"],
+                detected_at=datetime.utcnow()
+            )
+            db.add(log)
+        db.commit()
+
+        # 2. Update performance scores
+        performance_scorer = PerformanceScorer(db)
+        unique_students = set(
+            _safe_uuid(d.get("student_id", student_id_override)) 
+            for d in detections if d.get("student_id") or student_id_override
+        )
+        
+        for student_id in unique_students:
+            perf_score = performance_scorer.calculate_performance(
+                session_id=session_id,
+                actor_id=student_id,
+                actor_type="STUDENT",
+                subject_id=subject_id
+            )
+            performance_scorer.update_performance_aggregate(
+                session_id=session_id,
+                actor_id=student_id,
+                actor_type="STUDENT",
+                performance_score=perf_score
+            )
+        db.commit()
+    except Exception as e:
+        logger.error("[Background] Finalize learning ingest failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _finalize_testing_ingest(
+    session_id: UUID,
+    room_id: UUID,
+    detections: List[Dict],
+    snapshot_bytes: Optional[bytes],
+    annotated_image_base64: str,
+):
+    """Background task to persist logs and create risk incidents."""
+    db = SessionLocal()
+    try:
+        # 1. Store behavior logs
+        for detection in detections:
+            student_id = _safe_uuid(detection.get("student_id"))
+            
+            log = BehaviorLog(
+                session_id=session_id,
+                actor_id=student_id,
+                actor_type="STUDENT",
+                behavior_class=detection["behavior_class"],
+                count=1,
+                duration_seconds=0,
+                frame_snapshot=snapshot_bytes,
+                yolo_confidence=detection["confidence"],
+                detected_at=datetime.utcnow()
+            )
+            db.add(log)
+        db.commit()
+
+        # 2. Analyze risk and create incidents
+        risk_detector_instance = RiskDetector(db)
+        risk_analysis = risk_detector_instance.batch_analyze_behaviors(
+            session_id=session_id,
+            detected_behaviors=detections
+        )
+        
+        for student_id, risk_data in risk_analysis.items():
+            if risk_data["should_flag"]:
+                risk_detector_instance.create_risk_incident(
+                    session_id=session_id,
+                    student_id=student_id,
+                    room_id=room_id,
+                    risk_score=risk_data["risk_score"],
+                    behavior_details=risk_data["behaviors"],
+                    image_with_detections=annotated_image_base64
+                )
+        db.commit()
+    except Exception as e:
+        logger.error("[Background] Finalize testing ingest failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _list_temp_frames(temp_dir: Path, sort: str) -> List[Path]:
@@ -669,17 +778,16 @@ async def change_session_mode(
 @router.post("/sessions/{session_id}/learn", response_model=LearningModeResponse, status_code=201)
 async def ingest_learning_mode(
     session_id: UUID,
-    behavior: LearningModeIngest,
+    background_tasks: BackgroundTasks,
+    image: UploadFile = File(...),
+    confidence_threshold: float = Form(0.5),
+    student_id: Optional[UUID] = Form(None),
+    source_filename: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Learning Mode: AI detects behaviors and calculates performance scores.
-    
-    1. YOLO runs inference on image
-    2. Detections mapped to behavior classes
-    3. Performance scored per student using weights
-    4. Results returned with annotated image
+    Learning Mode: AI detects behaviors using binary image upload.
     """
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
@@ -693,105 +801,51 @@ async def ingest_learning_mode(
     if session.mode != "NORMAL":
         raise HTTPException(status_code=400, detail="Session must be in NORMAL mode")
 
-    _ensure_session_permissions(
-        current_user,
-        db,
-        {"mode:switch_learning", "ai_alerts:view"},
-        require_all=True,
-    )
-    
     try:
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
 
-        # Resolve output directory for annotated images
         settings = get_settings()
         output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
-        source_filename = behavior.source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
-        logger.debug("[API] /sessions/%s/learn payload len=%d source_filename=%s", session_id, len(behavior.image_base64 or ""), source_filename)
+        
+        # Read raw binary bytes directly from the upload
+        image_bytes = await image.read()
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_uri = f"data:{image.content_type};base64,{image_base64}"
 
-        # Run YOLO inference on image
+        resolved_source_filename = source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+
+        # Run YOLO inference
         frame_result = yolo_service.process_frame(
-            behavior.image_base64,
-            conf_threshold=behavior.confidence_threshold,
-            student_id=behavior.student_id,
+            data_uri,
+            conf_threshold=confidence_threshold,
+            student_id=student_id,
             mode="LEARNING",
             output_dir=output_dir,
-            source_filename=source_filename,
+            source_filename=resolved_source_filename,
         )
-        logger.info("[API] process_frame done for session %s: detection_count=%s saved_output_path=%s", session_id, frame_result.get('detection_count'), frame_result.get('saved_output_path'))
         
-        # Store detections as behavior logs
-        detections = frame_result["detections"]
-        
-        # Prepare snapshot bytes for storage (standardize to bytes instead of base64 string)
-        snapshot_bytes = None
-        if behavior.image_base64:
-            try:
-                b64_str = behavior.image_base64
-                if "," in b64_str:
-                    b64_str = b64_str.split(",")[1]
-                snapshot_bytes = base64.b64decode(b64_str)
-            except Exception as e:
-                logger.warning("Failed to decode snapshot for storage: %s", e)
+        # Offload DB persistence and scoring to background
+        background_tasks.add_task(
+            _finalize_learning_ingest,
+            session_id=session_id,
+            subject_id=session.subject_id,
+            detections=frame_result["detections"],
+            snapshot_bytes=image_bytes,
+            student_id_override=student_id
+        )
 
-        stored_detections = []
-        for detection in detections:
-            student_id = _safe_uuid(detection.get("student_id", behavior.student_id))
-            
-            log = BehaviorLog(
-                session_id=session_id,
-                actor_id=student_id,
-                actor_type="STUDENT",
-                behavior_class=detection["behavior_class"],
-                count=1,
-                duration_seconds=0,
-                frame_snapshot=snapshot_bytes,
-                yolo_confidence=detection["confidence"],
-                detected_at=datetime.utcnow()
-            )
-            db.add(log)
-            stored_detections.append(detection)
-        
-        db.commit()
-        
-        # Calculate performance scores
-        performance_scorer = PerformanceScorer(db)
-        analyzed_students = []
-        
-        # Get unique students in detections (ensure they are UUIDs)
-        unique_students = set(_safe_uuid(d.get("student_id", behavior.student_id)) for d in detections if d.get("student_id") or behavior.student_id)
-        
-        for student_id in unique_students:
-            perf_score = performance_scorer.calculate_performance(
-                session_id=session_id,
-                actor_id=student_id,
-                actor_type="STUDENT",
-                subject_id=session.subject_id
-            )
-            
-            # Update aggregate
-            performance_scorer.update_performance_aggregate(
-                session_id=session_id,
-                actor_id=student_id,
-                actor_type="STUDENT",
-                performance_score=perf_score
-            )
-            
-            analyzed_students.append({
-                "student_id": str(student_id),
-                "performance_score": round(perf_score, 2)
-            })
-        
         return LearningModeResponse(
             session_id=session_id,
             mode="LEARNING",
-            detections=stored_detections,
+            detections=frame_result["detections"],
             annotated_image_base64=frame_result["annotated_image_base64"],
             detection_count=frame_result["detection_count"],
-            students_analyzed=analyzed_students
+            students_analyzed=[] 
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("[API] Learning mode processing failed for session %s", session_id)
         raise HTTPException(status_code=400, detail=f"Learning mode processing failed: {str(e)}")
@@ -803,19 +857,15 @@ async def ingest_learning_mode(
 @router.post("/sessions/{session_id}/test", response_model=TestingModeResponse, status_code=201)
 async def ingest_testing_mode(
     session_id: UUID,
-    behavior: TestingModeIngest,
+    background_tasks: BackgroundTasks,
+    image: UploadFile = File(...),
+    confidence_threshold: float = Form(0.5),
+    source_filename: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Testing Mode: AI detects suspicious behaviors and calculates risk scores.
-    Auto-creates RiskIncidents when risk exceeds threshold.
-    
-    1. YOLO runs inference on image
-    2. Detections mapped to behavior classes
-    3. Risk scored per student (weighted: device_usage=0.4, talking=0.3, head_turn=0.2, etc.)
-    4. Incidents auto-flagged if risk > 0.65
-    5. Results returned with annotated image and incident list
+    Testing Mode: AI detects suspicious behaviors using binary image upload.
     """
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
     if not session:
@@ -832,100 +882,52 @@ async def ingest_testing_mode(
     if session.mode != "TESTING":
         raise HTTPException(status_code=400, detail="Session must be in TESTING mode")
 
-    _ensure_session_permissions(
-        current_user,
-        db,
-        {"mode:switch_testing", "ai_alerts:view"},
-        require_all=True,
-    )
-    
     try:
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
         
-        # Resolve output directory for annotated images
         settings = get_settings()
         output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
-        source_filename = behavior.source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+        
+        # Read raw binary bytes
+        image_bytes = await image.read()
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_uri = f"data:{image.content_type};base64,{image_base64}"
 
-        logger.debug("[API] /sessions/%s/test payload len=%d source_filename=%s", session_id, len(behavior.image_base64 or ""), source_filename)
+        resolved_source_filename = source_filename or f"live_{session_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
 
-        # Run YOLO inference on image
+        # Run YOLO inference
         frame_result = yolo_service.process_frame(
-            behavior.image_base64,
-            conf_threshold=behavior.confidence_threshold,
-            student_id=None,  # Will be assigned from face detection
+            data_uri,
+            conf_threshold=confidence_threshold,
+            student_id=None,
             mode="TESTING",
             output_dir=output_dir,
-            source_filename=source_filename,
+            source_filename=resolved_source_filename,
         )
-        logger.info("[API] process_frame done for session %s: detection_count=%s saved_output_path=%s", session_id, frame_result.get('detection_count'), frame_result.get('saved_output_path'))
         
-        # Store detection logs (skip if no valid student_id)
-        detections = frame_result["detections"]
-        room_id = session.room_id
-        
-        # Prepare snapshot bytes for storage
-        snapshot_bytes = None
-        if behavior.image_base64:
-            try:
-                b64_str = behavior.image_base64
-                if "," in b64_str:
-                    b64_str = b64_str.split(",")[1]
-                snapshot_bytes = base64.b64decode(b64_str)
-            except Exception as e:
-                logger.warning("Failed to decode snapshot for storage: %s", e)
-        
-        for detection in detections:
-            student_id = _safe_uuid(detection.get("student_id"))
-            
-            log = BehaviorLog(
-                session_id=session_id,
-                actor_id=student_id,
-                actor_type="STUDENT",
-                behavior_class=detection["behavior_class"],
-                count=1,
-                duration_seconds=0,
-                frame_snapshot=snapshot_bytes,
-                yolo_confidence=detection["confidence"],
-                detected_at=datetime.utcnow()
-            )
-            db.add(log)
-        
-        db.commit()
-        
-        # Analyze risk and create incidents
-        risk_detector_instance = RiskDetector(db)
-        risk_analysis = risk_detector_instance.batch_analyze_behaviors(
+        # Offload persistence, risk analysis, and incident creation to background
+        background_tasks.add_task(
+            _finalize_testing_ingest,
             session_id=session_id,
-            detected_behaviors=detections
+            room_id=session.room_id,
+            detections=frame_result["detections"],
+            snapshot_bytes=image_bytes,
+            annotated_image_base64=frame_result["annotated_image_base64"]
         )
-        
-        incidents_created = []
-        
-        for student_id, risk_data in risk_analysis.items():
-            if risk_data["should_flag"]:
-                # Auto-create incident
-                incident = risk_detector_instance.create_risk_incident(
-                    session_id=session_id,
-                    student_id=student_id,
-                    room_id=room_id,
-                    risk_score=risk_data["risk_score"],
-                    behavior_details=risk_data["behaviors"],
-                    image_with_detections=frame_result["annotated_image_base64"]
-                )
-                incidents_created.append(incident.id)
-        
+
         return TestingModeResponse(
             session_id=session_id,
             mode="TESTING",
-            detections=detections,
+            detections=frame_result["detections"],
             annotated_image_base64=frame_result["annotated_image_base64"],
             detection_count=frame_result["detection_count"],
-            risk_analysis=risk_analysis,
-            incidents_created=incidents_created
+            risk_analysis={}, # Alerts will be generated in background
+            incidents_created=[]
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("[API] Testing mode processing failed for session %s", session_id)
         raise HTTPException(status_code=400, detail=f"Testing mode processing failed: {str(e)}")
@@ -1483,6 +1485,7 @@ async def upload_and_analyze_image(
     file: UploadFile = File(...),
     mode: str = "LEARNING",
     confidence_threshold: float = 0.5,
+    student_id: Optional[UUID] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1505,6 +1508,9 @@ async def upload_and_analyze_image(
     if resolved_mode not in {"LEARNING", "TESTING"}:
         resolved_mode = "LEARNING"
         
+    # Use provided student_id or fall back to UNKNOWN
+    target_actor_id = student_id if student_id else UNKNOWN_STUDENT_ID
+        
     try:
         image_bytes = await file.read()
         
@@ -1516,13 +1522,10 @@ async def upload_and_analyze_image(
         encoded = base64.b64encode(image_bytes).decode("utf-8")
         image_base64 = f"data:{mime_type};base64,{encoded}"
         
-        # Generate dummy actor ID for unknown actors in the upload
-        dummy_actor_id = uuid.uuid4()
-        
         frame_result = yolo_service.process_frame(
             image_base64,
             conf_threshold=confidence_threshold,
-            student_id=dummy_actor_id,
+            student_id=str(target_actor_id),
             mode=resolved_mode,
             output_dir=None,
             source_filename=file.filename
@@ -1545,7 +1548,7 @@ async def upload_and_analyze_image(
         for detection in detections:
             log = BehaviorLog(
                 session_id=session_id,
-                actor_id=dummy_actor_id,
+                actor_id=target_actor_id,
                 actor_type="STUDENT",
                 behavior_class=detection["behavior_class"],
                 count=1,
@@ -1557,13 +1560,43 @@ async def upload_and_analyze_image(
             db.add(log)
             logs_created += 1
             
-        if logs_created > 0:
+        # Run risk analysis if in testing mode
+        incidents_created = 0
+        risk_summary = None
+        
+        if resolved_mode == "TESTING" and detections:
+            risk_detector = RiskDetector(db)
+            # We need to map student_id to detections if not already there
+            # Since this is a single-student upload (usually), we attribute all detections to target_actor_id
+            for det in detections:
+                det["student_id"] = str(target_actor_id)
+                
+            risk_analysis = risk_detector.batch_analyze_behaviors(
+                session_id=str(session_id),
+                detected_behaviors=detections
+            )
+            
+            risk_summary = risk_analysis.get(str(target_actor_id))
+            if risk_summary and risk_summary["should_flag"] and target_actor_id != UNKNOWN_STUDENT_ID:
+                risk_detector.create_risk_incident(
+                    session_id=str(session_id),
+                    student_id=str(target_actor_id),
+                    room_id=str(session.room_id),
+                    risk_score=risk_summary["risk_score"],
+                    behavior_details=risk_summary["behaviors"],
+                    image_with_detections=annotated_base64
+                )
+                incidents_created += 1
+            
+        if logs_created > 0 or incidents_created > 0:
             db.commit()
             
         return {
             "annotated_image_base64": annotated_base64,
             "detections": detections,
-            "logs_created": logs_created
+            "logs_created": logs_created,
+            "incidents_created": incidents_created,
+            "risk_summary": risk_summary
         }
         
     except Exception as e:

@@ -25,6 +25,7 @@ export function useFrameUpload(
   inferenceMode: 'LEARNING' | 'TESTING' | null = null,
   stopOnCaptureFailure: boolean = false,
   getSourceFilename?: () => string | null,
+  studentId?: string | null,
   onUploadSuccess?: (response: LearningModeResponse | TestingModeResponse) => void,
   onUploadError?: (errorMessage: string) => void,
 ): UseFrameUploadReturn {
@@ -42,7 +43,7 @@ export function useFrameUpload(
   const isRunningRef = useRef(false)
 
   const uploadFrame = useCallback(async (): Promise<boolean> => {
-    if (!sessionId || !intervalMs || !isRunningRef.current) return false
+    if (!sessionId || intervalMs === null || intervalMs === undefined || !isRunningRef.current) return false
 
     if (inFlightRef.current) {
       console.debug('[FrameUpload] Skip - upload already in flight')
@@ -80,6 +81,7 @@ export function useFrameUpload(
           image_base64: dataUri,
           confidence_threshold: confidenceThreshold,
           source_filename: getSourceFilename?.(),
+          student_id: studentId || undefined,
         })
       }
 
@@ -126,7 +128,7 @@ export function useFrameUpload(
   ])
 
   const scheduleNextUpload = useCallback((): void => {
-    if (!mountedRef.current || !intervalMs || !isRunningRef.current) return
+    if (!mountedRef.current || intervalMs === null || intervalMs === undefined || !isRunningRef.current) return
 
     if (timerRef.current) {
       clearTimeout(timerRef.current)
@@ -160,7 +162,7 @@ export function useFrameUpload(
   }, [intervalMs, scheduleNextUpload])
 
   const startUploading = useCallback((): void => {
-    if (!mountedRef.current || !sessionId || !intervalMs) {
+    if (!mountedRef.current || !sessionId || intervalMs === null || intervalMs === undefined) {
       console.warn('[FrameUpload] Cannot start - missing requirements', { 
         mounted: mountedRef.current, 
         hasSession: !!sessionId, 

@@ -28,7 +28,7 @@ import { PERMISSIONS } from '../constants/permissions'
 const GROUP_CODES: Array<'A' | 'B' | 'C' | 'LABS'> = ['A', 'B', 'C', 'LABS']
 
 function getValue(values: Array<{ mode: RefreshIntervalMode; interval_ms: number }>, mode: RefreshIntervalMode): number {
-  return values.find((item) => item.mode === mode)?.interval_ms ?? (mode === 'TESTING' ? 2000 : 30000)
+  return values.find((item) => item.mode === mode)?.interval_ms ?? (mode === 'TESTING' ? 1000 : 3000)
 }
 
 export function AdminSettingsPage(): JSX.Element {
@@ -54,13 +54,13 @@ export function AdminSettingsPage(): JSX.Element {
   const minInterval = useMemo(() => {
     if (buildingConfig?.min_interval_ms) return buildingConfig.min_interval_ms
     if (roomConfig?.min_interval_ms) return roomConfig.min_interval_ms
-    return 1000
+    return 0
   }, [buildingConfig, roomConfig])
 
   const maxInterval = useMemo(() => {
     if (buildingConfig?.max_interval_ms) return buildingConfig.max_interval_ms
     if (roomConfig?.max_interval_ms) return roomConfig.max_interval_ms
-    return 120000
+    return 10000
   }, [buildingConfig, roomConfig])
 
   useEffect(() => {
@@ -348,8 +348,8 @@ export function AdminSettingsPage(): JSX.Element {
                 {GROUP_CODES.map((groupCode) => {
                   const row = groups.find((item) => item.group_code === groupCode)
                   const draft = groupDraft[groupCode] ?? {
-                    normal: String(row?.normal_interval_ms ?? 30000),
-                    testing: String(row?.testing_interval_ms ?? 2000),
+                    normal: String(row?.normal_interval_ms ?? 3000),
+                    testing: String(row?.testing_interval_ms ?? 1000),
                   }
                   return (
                     <tr key={groupCode}>

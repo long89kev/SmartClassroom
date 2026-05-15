@@ -9,14 +9,14 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Keep group-level polling defaults available for admin settings.
 INSERT INTO refresh_interval_settings (id, scope_type, scope_id, mode, interval_ms, updated_by, created_at, updated_at)
 VALUES
-    (uuid_generate_v4(), 'GROUP', 'A', 'NORMAL', 30000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'A', 'TESTING', 2000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'B', 'NORMAL', 30000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'B', 'TESTING', 2000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'C', 'NORMAL', 30000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'C', 'TESTING', 2000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'LABS', 'NORMAL', 30000, NULL, NOW(), NOW()),
-    (uuid_generate_v4(), 'GROUP', 'LABS', 'TESTING', 2000, NULL, NOW(), NOW())
+    (uuid_generate_v4(), 'GROUP', 'A', 'NORMAL', 3000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'A', 'TESTING', 1000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'B', 'NORMAL', 3000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'B', 'TESTING', 1000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'C', 'NORMAL', 3000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'C', 'TESTING', 1000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'LABS', 'NORMAL', 3000, NULL, NOW(), NOW()),
+    (uuid_generate_v4(), 'GROUP', 'LABS', 'TESTING', 1000, NULL, NOW(), NOW())
 ON CONFLICT (scope_type, scope_id, mode) DO UPDATE SET
     interval_ms = EXCLUDED.interval_ms,
     updated_at = NOW();

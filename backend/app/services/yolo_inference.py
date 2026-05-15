@@ -1,19 +1,19 @@
+"""YOLO inference service for classroom behavior detection using retrained YOLO26 weights.
+
+This module keeps the same public service surface as the legacy inference wrapper,
+but loads the retrained YOLO26 checkpoints instead of the legacy YOLOv7 models.
 """
-YOLO inference service for behavior detection in classroom frames.
-- Loads YOLOv8 model
-- Runs inference on base64 images
-- Extracts behavior detections
-- Annotates images with bounding boxes and labels
-"""
+
+from __future__ import annotations
 
 import base64
 import io
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from PIL import Image, ImageDraw, ImageFont
-import logging
-from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 
@@ -23,51 +23,45 @@ class _ModelLoadError(RuntimeError):
 
 
 class YOLOInferenceService:
-    """
-    Wrapper around YOLO for classroom behavior detection.
-    Maps YOLO classes to behavior types.
-    """
+    """Wrapper around YOLO26 for classroom behavior detection."""
+
+    INFERENCE_IMGSZ = 640
+
+    # Dynamically configure ONNX Runtime / BLAS thread count based on CPU cores
+    # to balance throughput vs. CPU thrashing on multi-core systems and Docker.
+    # Formula: min(max(2, cores // 4), 8)  →  2-core=2, 8-core=2, 16-core=4, 32+=8
+    import os as _os
+    _INTRA_THREADS = str(min(max(2, (_os.cpu_count() or 2) // 4), 8))
+    _os.environ.setdefault("OMP_NUM_THREADS", _INTRA_THREADS)
+    _os.environ.setdefault("MKL_NUM_THREADS", _INTRA_THREADS)
+    _os.environ.setdefault("NUMEXPR_NUM_THREADS", _INTRA_THREADS)
+    _os.environ.setdefault("OPENBLAS_NUM_THREADS", _INTRA_THREADS)
 
     LEARNING_STUDENT_LABELS = {
         "HAND_RAISING",
         "READ",
         "WRITE",
         "BOW_THE_HEAD",
-        "TALK",
-        "STAND",
         "ANSWER",
         "ON_STAGE_INTERACTION",
         "DISCUSS",
-        "YAWN",
-        "CLAP",
-        "LEANING_ON_DESK",
-        "USING_PHONE",
-        "USING_COMPUTER",
     }
 
     LEARNING_TEACHER_LABELS = {
         "GUIDE",
+        "TEACHER",
         "ANSWER",
         "ON_STAGE_INTERACTION",
-        "BLACKBOARD_WRITING",
-        "TEACHER",
-        "STAND",
-        "USING_COMPUTER",
-        "BLACKBOARD",
     }
 
     TESTING_LABELS = {
         "TURN_THE_HEAD",
-        "TALK",
         "DISCUSS",
-        "USING_PHONE",
-        "USING_COMPUTER",
+        "ANSWER",
     }
 
-    LABEL_ALIASES = {
-        "DISCUSS": ["TALK"],
-    }
-
+    LABEL_ALIASES = {}
+    
     COLOR_MAP = {
         "HAND_RAISING": (0, 255, 127),
         "READ": (0, 255, 0),
@@ -75,30 +69,24 @@ class YOLOInferenceService:
         "BOW_THE_HEAD": (255, 255, 0),
         "TURN_THE_HEAD": (255, 235, 59),
         "DISCUSS": (255, 165, 0),
-        "TALK": (255, 140, 0),
-        "STAND": (0, 191, 255),
         "ANSWER": (30, 144, 255),
         "ON_STAGE_INTERACTION": (72, 209, 204),
         "GUIDE": (46, 139, 87),
-        "BLACKBOARD_WRITING": (33, 150, 243),
-        "BLACKBOARD": (100, 149, 237),
         "TEACHER": (50, 205, 50),
-        "USING_COMPUTER": (186, 104, 200),
-        "USING_PHONE": (220, 20, 60),
-        "YAWN": (255, 193, 7),
-        "CLAP": (255, 215, 0),
-        "LEANING_ON_DESK": (205, 133, 63),
     }
 
-    # Canonical labels from all available model classes in YOLO/SCB-Dataset.
     MODEL_SPECS: List[Dict[str, Any]] = [
         {
             "model_key": "student_bow_turn",
             "actor_type": "STUDENT",
-            "relative_weight_path": [
-                "yolo_weights",
-                "student_bow_turn",
-                "best.pt",
+            "weight_candidates": [
+                ["backend", "models", "yolo_weights", "student_bow_turn", "best.onnx"],
+                ["backend", "models", "yolo_weights", "student_bow_turn", "best.pt"],
+                ["backend", "models", "yolo_weights", "student_bow_turn", "exp", "weights", "best.pt"],
+                ["backend", "models", "yolo_weights", "student_bow_turn", "exp", "exp", "weights", "best.pt"],
+                ["models", "yolo_weights", "student_bow_turn", "best.onnx"],
+                ["models", "yolo_weights", "student_bow_turn", "best.pt"],
+                ["models", "yolo_weights", "student_bow_turn", "exp", "weights", "best.pt"],
             ],
             "class_names": ["BowHead", "TurnHead"],
             "class_map": {
@@ -109,10 +97,12 @@ class YOLOInferenceService:
         {
             "model_key": "student_discuss",
             "actor_type": "STUDENT",
-            "relative_weight_path": [
-                "yolo_weights",
-                "student_discuss",
-                "best.pt",
+            "weight_candidates": [
+                ["backend", "models", "yolo_weights", "student_discuss", "best.onnx"],
+                ["backend", "models", "yolo_weights", "student_discuss", "best.pt"],
+                ["backend", "models", "yolo_weights", "student_discuss", "exp", "weights", "best.pt"],
+                ["models", "yolo_weights", "student_discuss", "best.onnx"],
+                ["models", "yolo_weights", "student_discuss", "best.pt"],
             ],
             "class_names": ["discuss"],
             "class_map": {
@@ -122,10 +112,12 @@ class YOLOInferenceService:
         {
             "model_key": "student_hand_read_write",
             "actor_type": "STUDENT",
-            "relative_weight_path": [
-                "yolo_weights",
-                "student_hand_read_write",
-                "best.pt",
+            "weight_candidates": [
+                ["backend", "models", "yolo_weights", "student_hand_read_write", "best.onnx"],
+                ["backend", "models", "yolo_weights", "student_hand_read_write", "best.pt"],
+                ["backend", "models", "yolo_weights", "student_hand_read_write", "exp", "weights", "best.pt"],
+                ["models", "yolo_weights", "student_hand_read_write", "best.onnx"],
+                ["models", "yolo_weights", "student_hand_read_write", "best.pt"],
             ],
             "class_names": ["hand-raising", "read", "write"],
             "class_map": {
@@ -137,155 +129,113 @@ class YOLOInferenceService:
         {
             "model_key": "teacher_behavior",
             "actor_type": "TEACHER",
-            "relative_weight_path": [
-                "yolo_weights",
-                "teacher_behavior",
-                "best.pt",
+            "weight_candidates": [
+                ["backend", "models", "yolo_weights", "teacher_behavior", "best.onnx"],
+                ["backend", "models", "yolo_weights", "teacher_behavior", "best.pt"],
+                ["backend", "models", "yolo_weights", "teacher_behavior", "exp", "weights", "best.pt"],
+                ["models", "yolo_weights", "teacher_behavior", "best.onnx"],
+                ["models", "yolo_weights", "teacher_behavior", "best.pt"],
             ],
-            "class_names": [
-                "guide",
-                "answer",
-                "On-stage interaction",
-                "blackboard-writing",
-                "teacher",
-                "stand",
-                "screen",
-                "blackBoard",
-            ],
+            "class_names": ["guide", "answer", "On-stage interaction", "teacher"],
             "class_map": {
                 "guide": "GUIDE",
                 "answer": "ANSWER",
                 "On-stage interaction": "ON_STAGE_INTERACTION",
-                "blackboard-writing": "BLACKBOARD_WRITING",
                 "teacher": "TEACHER",
-                "stand": "STAND",
-                "screen": "USING_COMPUTER",
-                "blackBoard": "BLACKBOARD",
             },
         },
     ]
 
     def __init__(self):
-        """Initialize all configured YOLO models."""
         self.models: Dict[str, Dict[str, Any]] = {}
         try:
             for spec in self.MODEL_SPECS:
                 loaded_model = self._load_model_for_spec(spec)
                 if loaded_model is None:
                     continue
-
                 self.models[spec["model_key"]] = loaded_model
-        except Exception as e:
-            logger.error(f"Failed to load YOLO model: {e}")
+        except Exception as exc:
+            logger.error("Failed to load YOLO model: %s", exc)
             self.models = {}
 
         if not self.models:
             logger.warning("No YOLO models loaded. Inference endpoints will fail until paths are valid.")
 
-        # NOTE: Requested labels like USING_PHONE/YAWN/CLAP/LEANING_ON_DESK are not present
-        # in the selected 4 model class lists, so they cannot be detected without retraining.
-        logger.warning(
-            "Selected models do not include direct classes for USING_PHONE, YAWN, CLAP, LEANING_ON_DESK."
-        )
-
     def _load_model_for_spec(self, spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        model_path = self._resolve_model_path(spec["relative_weight_path"])
+        model_path = self._resolve_model_path(spec["weight_candidates"])
         if not model_path:
-            logger.warning(
-                "Skipping model %s because best.pt was not found",
-                spec["model_key"],
-            )
+            logger.warning("Skipping model %s because best.pt was not found", spec["model_key"])
             return None
 
-        logger.info("Loading model %s from %s", spec["model_key"], model_path)
+        logger.info("Loading YOLO26 model %s from %s", spec["model_key"], model_path)
 
-        # ---------- Try legacy YOLOv7 loader FIRST ----------
-        # Our SCB-Dataset weights are YOLOv7 checkpoints. Loading them via
-        # Ultralytics first wastes memory (each ~75 MB) because Ultralytics
-        # unpickles the model then we reject it and load again via legacy.
-        # Going legacy-first avoids the double-load.
-        try:
-            import sys
-            import importlib
-
-            # Ensure the models package is importable (needed for torch.load
-            # to reconstruct pickle references like models.yolo.Model).
-            models_root = model_path
-            while models_root.name != "models" and models_root.parent != models_root:
-                models_root = models_root.parent
-
-            models_parent = str(models_root.parent)
-            if models_parent not in sys.path:
-                sys.path.insert(0, models_parent)
-                logger.debug("Added %s to sys.path for legacy loader", models_parent)
-
-            from models.yolo import load_legacy_yolov7_detector
-
-            legacy_model = load_legacy_yolov7_detector(model_path, names=spec["class_names"])
-            logger.info("Legacy YOLOv7 loader succeeded for %s", spec["model_key"])
-            return {
-                "model": legacy_model,
-                "class_names": spec["class_names"],
-                "class_map": spec["class_map"],
-                "actor_type": spec["actor_type"],
-                "model_path": str(model_path),
-                "loader": "legacy_yolov7",
-            }
-        except Exception as legacy_error:
-            logger.warning(
-                "Legacy YOLOv7 loader failed for %s: %s. Trying Ultralytics loader.",
-                spec["model_key"],
-                legacy_error,
-            )
-
-        # ---------- Fallback: Ultralytics YOLOv8 loader ----------
         try:
             from ultralytics import YOLO
 
             model = YOLO(str(model_path))
-
-            logger.info("Ultralytics YOLOv8 loader succeeded for %s", spec["model_key"])
+            logger.info("Ultralytics YOLO loader succeeded for %s", spec["model_key"])
             return {
                 "model": model,
                 "class_names": spec["class_names"],
                 "class_map": spec["class_map"],
                 "actor_type": spec["actor_type"],
                 "model_path": str(model_path),
-                "loader": "ultralytics",
+                "loader": "ultralytics_yolo26",
             }
-        except Exception as ultralytics_error:
-            logger.error(
-                "Failed to load YOLO model %s via both loaders. "
-                "Legacy error: %s | Ultralytics error: %s",
-                spec["model_key"],
-                legacy_error,
-                ultralytics_error,
-            )
+        except Exception as exc:
+            logger.error("Failed to load YOLO26 model %s: %s", spec["model_key"], exc)
             return None
 
-    def _resolve_model_path(self, relative_path: List[str]) -> Optional[Path]:
+    # Ordered list of root directories to search for model weights.
+    # Populated lazily to support both local dev and Docker container layouts.
+    _SEARCH_ROOTS: List[Path] = []
+
+    @classmethod
+    def _get_search_roots(cls) -> List[Path]:
+        """Return root dirs for weight resolution (repo root, Docker /app, etc.)."""
+        if not cls._SEARCH_ROOTS:
+            repo_root = Path(__file__).resolve().parents[3]
+            cls._SEARCH_ROOTS = [
+                repo_root,
+                Path("/app"),              # Docker WORKDIR
+                Path("/app") / "backend",  # Docker alt layout
+            ]
+        return cls._SEARCH_ROOTS
+
+    def _resolve_model_path(self, relative_paths: List[List[str]]) -> Optional[Path]:
         """Resolve weight path from common workspace/container roots."""
-        repo_root = Path(__file__).resolve().parents[3]
-        candidates = [
-            repo_root.joinpath("backend", "models", *relative_path),
-            repo_root.joinpath("models", *relative_path),
-            repo_root.joinpath(*relative_path),
-            Path("/app", "models").joinpath(*relative_path),
-            Path("/app", "backend", "models").joinpath(*relative_path),
-            Path(*relative_path),
-        ]
+        roots = self._get_search_roots()
+        candidates: List[Path] = []
+
+        for path_parts in relative_paths:
+            for root in roots:
+                candidates.append(root.joinpath(*path_parts))
+                # Try with "backend" prefix stripped (if present) or added (if absent)
+                if path_parts[:1] == ["backend"]:
+                    candidates.append(root.joinpath(*path_parts[1:]))
+                else:
+                    candidates.append(root / "backend" / Path(*path_parts))
+
         for candidate in candidates:
-            if candidate.exists():
+            if candidate.exists() and candidate.is_file():
                 return candidate
+            if candidate.exists() and candidate.is_dir():
+                best_onnx = candidate / "best.onnx"
+                if best_onnx.exists():
+                    return best_onnx
+                best_pt = candidate / "best.pt"
+                if best_pt.exists():
+                    return best_pt
+                exp_pt = candidate / "exp" / "weights" / "best.pt"
+                if exp_pt.exists():
+                    return exp_pt
+                nested_pt = candidate / "exp" / "exp" / "weights" / "best.pt"
+                if nested_pt.exists():
+                    return nested_pt
         return None
 
     def _get_active_mode(self, mode: Optional[str], student_id: Optional[str]) -> str:
-        """
-        Resolve mode while keeping backward compatibility:
-        - explicit mode wins
-        - otherwise infer TESTING when no student_id is passed
-        - default to LEARNING
-        """
+        """Resolve mode while keeping backward compatibility."""
         if mode:
             normalized = mode.strip().upper()
             if normalized in {"LEARNING", "TESTING"}:
@@ -300,7 +250,6 @@ class YOLOInferenceService:
         return set(self.LEARNING_STUDENT_LABELS) | set(self.LEARNING_TEACHER_LABELS)
 
     def _models_for_mode(self, mode: str) -> List[str]:
-        # Keep testing lightweight by skipping the hand/read/write detector.
         if mode == "TESTING":
             return ["student_bow_turn", "student_discuss", "teacher_behavior"]
         return [
@@ -316,31 +265,38 @@ class YOLOInferenceService:
             return class_names[class_id]
         return f"class_{class_id}"
 
+    @staticmethod
+    def _allowed_class_ids_for_model(
+        model_entry: Dict[str, Any], allowed_labels: set
+    ) -> Optional[List[int]]:
+        """Map allowed behavior labels back to model class IDs for early NMS filtering.
+
+        Returns a list of integer class IDs that should be kept, or ``None``
+        if every class in the model is allowed (no filtering needed).
+        """
+        class_names = model_entry["class_names"]
+        class_map = model_entry["class_map"]
+        ids = []
+        for idx, raw_name in enumerate(class_names):
+            mapped = class_map.get(raw_name, raw_name.upper().replace("-", "_"))
+            if mapped in allowed_labels:
+                ids.append(idx)
+        # Return None when all classes pass — avoids an unnecessary filter
+        return ids if len(ids) < len(class_names) else None
+
     def is_ready(self) -> bool:
-        """Check if model is loaded and ready."""
         return bool(self.models)
 
     def decode_base64_image(self, image_base64: str) -> Image.Image:
-        """
-        Decode base64 string to PIL Image.
-        
-        Args:
-            image_base64: Base64 encoded image string (without data: prefix)
-            
-        Returns:
-            PIL Image object
-        """
         try:
-            # Remove data URI prefix if present
             if "," in image_base64:
                 image_base64 = image_base64.split(",")[1]
 
             image_data = base64.b64decode(image_base64)
-            image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            return image
-        except Exception as e:
-            logger.error(f"Failed to decode base64 image: {e}")
-            raise ValueError(f"Invalid base64 image: {e}")
+            return Image.open(io.BytesIO(image_data)).convert("RGB")
+        except Exception as exc:
+            logger.error("Failed to decode base64 image: %s", exc)
+            raise ValueError(f"Invalid base64 image: {exc}")
 
     def run_inference(
         self,
@@ -348,83 +304,136 @@ class YOLOInferenceService:
         conf_threshold: float = 0.5,
         mode: str = "LEARNING",
     ) -> List[Dict]:
-        """
-        Run YOLO inference on image.
-        
-        Args:
-            image: PIL Image object
-            conf_threshold: Confidence threshold (0-1)
-            
-        Returns:
-            List of detections: [{
-                "class": "CHEATING",
-                "confidence": 0.92,
-                "bbox": [x, y, w, h],  # Normalized 0-1
-                "student_id": "auto-generated-or-provided"
-            }]
-        """
         if not self.is_ready():
             raise RuntimeError("YOLO models not loaded")
 
         try:
-            # Convert PIL to numpy array
-            image_array = np.array(image)
+            # Capture original dimensions for coordinate scaling later
+            orig_w, orig_h = image.size
+            
+            # Pre-resize a copy once so each model receives an already-correct-sized
+            # image, avoiding redundant resize operations across multiple models.
+            inference_image = image
+            scale_factor = 1.0
+            
+            if max(image.size) > self.INFERENCE_IMGSZ:
+                inference_image = image.copy()
+                inference_image.thumbnail(
+                    (self.INFERENCE_IMGSZ, self.INFERENCE_IMGSZ),
+                    Image.LANCZOS,
+                )
+                resized_w, _ = inference_image.size
+                scale_factor = orig_w / resized_w
 
-            detections = []
             allowed_labels = self._allowed_labels_for_mode(mode)
             enabled_model_keys = self._models_for_mode(mode)
-            detection_idx = 0
 
-            for model_key in enabled_model_keys:
-                model_entry = self.models.get(model_key)
-                if not model_entry:
-                    continue
-
-                results = model_entry["model"](image_array, conf=conf_threshold, verbose=False)
-                class_names = model_entry["class_names"]
-                class_map = model_entry["class_map"]
-                actor_type = model_entry["actor_type"]
-
-                for result in results:
-                    for box in result.boxes:
-                        confidence = float(box.conf[0])
-                        class_id = int(box.cls[0])
-                        raw_label = self._safe_raw_label(class_names, class_id)
-                        behavior_class = class_map.get(raw_label, raw_label.upper().replace("-", "_"))
-
-                        if behavior_class not in allowed_labels:
-                            continue
-
-                        # Get normalized bbox (0-1)
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        img_w, img_h = image.size
-
-                        x_norm = x1 / img_w
-                        y_norm = y1 / img_h
-                        w_norm = (x2 - x1) / img_w
-                        h_norm = (y2 - y1) / img_h
-
-                        detection = {
-                            "behavior_class": behavior_class,
-                            "behavior_aliases": self.LABEL_ALIASES.get(behavior_class, []),
-                            "raw_label": raw_label,
-                            "actor_type": actor_type,
-                            "source_model": model_key,
-                            "confidence": round(confidence, 3),
-                            "bbox": [round(x, 3) for x in [x_norm, y_norm, w_norm, h_norm]],
-                            "bbox_pixels": [x1, y1, x2, y2],
-                            "student_id": f"detected_{detection_idx}",
-                        }
-
-                        detections.append(detection)
-                        detection_idx += 1
+            detections: List[Dict] = []
             
-            logger.info(f"Inference complete: {len(detections)} detections")
+            # Use a ThreadPoolExecutor to run multiple YOLO models in parallel.
+            # Inference in Ultralytics releases the GIL, allowing true parallel execution.
+            with ThreadPoolExecutor(max_workers=len(enabled_model_keys)) as executor:
+                futures = []
+                for model_key in enabled_model_keys:
+                    model_entry = self.models.get(model_key)
+                    if not model_entry:
+                        continue
+                    
+                    futures.append(
+                        executor.submit(
+                            self._run_inference_on_model,
+                            model_key,
+                            model_entry,
+                            inference_image,
+                            allowed_labels,
+                            conf_threshold,
+                            scale_factor,
+                            orig_w,
+                            orig_h
+                        )
+                    )
+                
+                for future in as_completed(futures):
+                    try:
+                        model_detections = future.result()
+                        detections.extend(model_detections)
+                    except Exception as e:
+                        logger.error("Parallel inference task failed: %s", e)
+
+            # Re-assign unique student IDs after merging results
+            for idx, detection in enumerate(detections):
+                detection["student_id"] = f"detected_{idx}"
+
+            logger.info("Inference complete: %d detections", len(detections))
             return detections
 
-        except Exception as e:
-            logger.error(f"YOLO inference failed: {e}")
-            raise RuntimeError(f"Inference error: {e}")
+        except Exception as exc:
+            logger.error("YOLO inference failed: %s", exc)
+            raise RuntimeError(f"Inference error: {exc}")
+
+    def _run_inference_on_model(
+        self,
+        model_key: str,
+        model_entry: Dict[str, Any],
+        inference_image: Image.Image,
+        allowed_labels: set,
+        conf_threshold: float,
+        scale_factor: float,
+        orig_w: int,
+        orig_h: int
+    ) -> List[Dict]:
+        """Helper to run inference on a single model, used by parallel executor."""
+        model_detections = []
+        
+        # Filter classes at the model / NMS level for efficiency
+        allowed_ids = self._allowed_class_ids_for_model(
+            model_entry, allowed_labels
+        )
+
+        results = model_entry["model"](
+            inference_image,
+            conf=conf_threshold,
+            imgsz=self.INFERENCE_IMGSZ,
+            verbose=False,
+            classes=allowed_ids,
+        )
+        
+        class_names = model_entry["class_names"]
+        class_map = model_entry["class_map"]
+        actor_type = model_entry["actor_type"]
+
+        for result in results:
+            for box in result.boxes:
+                confidence = float(box.conf[0])
+                class_id = int(box.cls[0])
+                raw_label = self._safe_raw_label(class_names, class_id)
+                behavior_class = class_map.get(raw_label, raw_label.upper().replace("-", "_"))
+
+                if behavior_class not in allowed_labels:
+                    continue
+
+                # Map coordinates back to the original image space
+                x1, y1, x2, y2 = [coord * scale_factor for coord in box.xyxy[0].tolist()]
+
+                detection = {
+                    "behavior_class": behavior_class,
+                    "behavior_aliases": self.LABEL_ALIASES.get(behavior_class, []),
+                    "raw_label": raw_label,
+                    "actor_type": actor_type,
+                    "source_model": model_key,
+                    "confidence": round(confidence, 3),
+                    "bbox": [
+                        round(x1 / orig_w, 3),
+                        round(y1 / orig_h, 3),
+                        round((x2 - x1) / orig_w, 3),
+                        round((y2 - y1) / orig_h, 3),
+                    ],
+                    "bbox_pixels": [x1, y1, x2, y2],
+                    "student_id": "temp" # Will be finalized in run_inference
+                }
+                model_detections.append(detection)
+        
+        return model_detections
 
     def annotate_image(
         self,
@@ -432,87 +441,41 @@ class YOLOInferenceService:
         detections: List[Dict],
         include_confidence: bool = True,
     ) -> Image.Image:
-        """
-        Draw bounding boxes and labels on image.
-        
-        Args:
-            image: PIL Image object
-            detections: List of detection objects
-            include_confidence: Include confidence score in label
-            
-        Returns:
-            Annotated PIL Image
-        """
         image_copy = image.copy()
         draw = ImageDraw.Draw(image_copy)
-        
+
         try:
-            # Try to load a TTF font, fallback to default
             font = ImageFont.truetype("arial.ttf", 15)
-        except:
+        except Exception:
             font = ImageFont.load_default()
-        
+
         for detection in detections:
             x1, y1, x2, y2 = detection["bbox_pixels"]
             behavior_class = detection["behavior_class"]
             confidence = detection["confidence"]
-            
-            # Get color for this behavior class
             color = self.COLOR_MAP.get(behavior_class, (255, 255, 255))
-            
-            # Draw bounding box
+
             draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
-            
-            # Draw label
+
             label = behavior_class
             if include_confidence:
                 label = f"{behavior_class} {confidence:.1%}"
-            
-            # Background for text
+
             bbox = draw.textbbox((x1, y1), label, font=font)
             draw.rectangle(bbox, fill=color)
-            
-            # Draw text
             draw.text((x1, y1), label, fill="white", font=font)
-        
+
         return image_copy
 
     def encode_image_to_base64(self, image: Image.Image, format: str = "PNG") -> str:
-        """
-        Encode PIL Image to base64 string.
-        
-        Args:
-            image: PIL Image object
-            format: Image format (PNG, JPEG)
-            
-        Returns:
-            Base64 encoded image string
-        """
         buffer = io.BytesIO()
         image.save(buffer, format=format)
         image_data = base64.b64encode(buffer.getvalue()).decode()
         return f"data:image/{format.lower()};base64,{image_data}"
 
-    def save_annotated_image(
-        self,
-        image: Image.Image,
-        output_dir: Path,
-        filename: str,
-    ) -> Path:
-        """
-        Save an annotated PIL Image to disk.
-
-        Args:
-            image: Annotated PIL Image object
-            output_dir: Directory to save to (created if absent)
-            filename: Filename to use (extension preserved from original)
-
-        Returns:
-            The full path of the saved file.
-        """
+    def save_annotated_image(self, image: Image.Image, output_dir: Path, filename: str) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Normalise extension: keep original if it is jpg/jpeg/png, else default to png
         stem = Path(filename).stem
         suffix = Path(filename).suffix.lower()
         if suffix in {".jpg", ".jpeg"}:
@@ -535,65 +498,49 @@ class YOLOInferenceService:
         mode: Optional[str] = None,
         output_dir: Optional[Path] = None,
         source_filename: Optional[str] = None,
+        skip_annotation: bool = False,
     ) -> Dict:
-        """
-        End-to-end frame processing:
-        1. Decode base64 image
-        2. Run YOLO inference
-        3. Annotate image
-        4. Optionally save annotated image to output_dir
-        5. Encode result
-        
-        Args:
-            image_base64: Base64 encoded frame
-            conf_threshold: Confidence threshold
-            student_id: Optional student ID to assign to detections
-            mode: LEARNING or TESTING
-            output_dir: If provided, save annotated image here
-            source_filename: Original filename (used for the saved output filename)
-            
-        Returns:
-            {
-                "detections": [...],
-                "annotated_image_base64": "data:image/png;base64,...",
-                "detection_count": 5
-            }
-        """
         try:
-            logger.debug("[YOLO] process_frame start mode=%s student_id=%s output_dir=%s source_filename=%s", mode, student_id, output_dir, source_filename)
-            # Decode
+            logger.debug(
+                "[YOLO] process_frame start mode=%s student_id=%s output_dir=%s source_filename=%s",
+                mode,
+                student_id,
+                output_dir,
+                source_filename,
+            )
             image = self.decode_base64_image(image_base64)
             active_mode = self._get_active_mode(mode, student_id)
-            
-            # Infer
-            detections = self.run_inference(
-                image,
-                conf_threshold=conf_threshold,
-                mode=active_mode,
-            )
-            
-            # Assign student_id if provided
+
+            detections = self.run_inference(image, conf_threshold=conf_threshold, mode=active_mode)
+
             if student_id:
                 for detection in detections:
                     detection["student_id"] = student_id
-            
-            # Annotate
-            annotated_image = self.annotate_image(image, detections)
 
-            # Persist to disk when requested
+            # Skip the expensive annotate + encode cycle when the caller
+            # only needs the detection list (e.g. headless batch jobs).
+            annotated_base64 = None
             saved_path = None
-            if output_dir and source_filename:
-                try:
-                    saved_path = self.save_annotated_image(
-                        annotated_image, output_dir, source_filename
-                    )
-                except Exception as save_err:
-                    logger.exception("Failed to save annotated image")
-            
-            # Encode
-            annotated_base64 = self.encode_image_to_base64(annotated_image)
-            logger.debug("[YOLO] process_frame complete: detections=%d saved_path=%s", len(detections), saved_path)
-            
+
+            if not skip_annotation:
+                annotated_image = self.annotate_image(image, detections)
+
+                if output_dir and source_filename:
+                    try:
+                        saved_path = self.save_annotated_image(
+                            annotated_image, output_dir, source_filename
+                        )
+                    except Exception:
+                        logger.exception("Failed to save annotated image")
+
+                annotated_base64 = self.encode_image_to_base64(annotated_image)
+
+            logger.debug(
+                "[YOLO] process_frame complete: detections=%d saved_path=%s",
+                len(detections),
+                saved_path,
+            )
+
             return {
                 "detections": detections,
                 "annotated_image_base64": annotated_base64,
@@ -601,29 +548,17 @@ class YOLOInferenceService:
                 "mode": active_mode,
                 "saved_output_path": str(saved_path) if saved_path else None,
             }
-        
-        except Exception as e:
-            logger.error(f"Frame processing failed: {e}")
-            raise RuntimeError(f"Failed to process frame: {e}")
+        except Exception as exc:
+            logger.error("Frame processing failed: %s", exc)
+            raise RuntimeError(f"Failed to process frame: {exc}")
 
     def batch_process_frames(
         self,
-        frames: List[Dict],  # [{image_base64, student_id?}, ...]
+        frames: List[Dict],
         conf_threshold: float = 0.5,
         mode: Optional[str] = None,
     ) -> List[Dict]:
-        """
-        Process multiple frames (for batch analysis).
-        
-        Args:
-            frames: List of frame data
-            conf_threshold: Confidence threshold
-            
-        Returns:
-            List of processed results
-        """
         results = []
-        
         for frame in frames:
             try:
                 result = self.process_frame(
@@ -633,8 +568,7 @@ class YOLOInferenceService:
                     mode,
                 )
                 results.append(result)
-            except Exception as e:
-                logger.error(f"Failed to process frame: {e}")
-                results.append({"error": str(e)})
-        
+            except Exception as exc:
+                logger.error("Failed to process frame: %s", exc)
+                results.append({"error": str(exc)})
         return results

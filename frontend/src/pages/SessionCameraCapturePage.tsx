@@ -4,7 +4,7 @@ import { Play, Square, AlertCircle, RefreshCw, Upload, Camera, Activity } from '
 import { CameraIngestPanel, type CameraIngestPanelHandle } from '../components/CameraIngestPanel'
 import { useCameraInterval } from '../hooks/useCameraInterval'
 import { useFrameUpload } from '../hooks/useFrameUpload'
-import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, ingestLearningMode, ingestTestingMode, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage } from '../services/api'
+import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, ingestLearningMode, ingestTestingMode, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage, getSessionAttendanceReport } from '../services/api'
 import type { BehaviorLogEntry, LearningModeResponse, SessionSummary, TempOutputFrameResponse, TestingModeResponse } from '../types'
 import './SessionCameraCapturePage.css'
 
@@ -35,6 +35,9 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [cameraState, setCameraState] = useState<'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'ERROR'>('IDLE')
   const [diagnosticLogs, setDiagnosticLogs] = useState<{ id: number; level: string; message: string; time: Date }[]>([])
   const logIdRef = useRef(0)
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
+  const [enrolledStudents, setEnrolledStudents] = useState<any[]>([])
+  const [loadingStudents, setLoadingStudents] = useState(false)
 
   // Intercept console messages for the UI monitor
   useEffect(() => {
@@ -194,6 +197,7 @@ export function SessionCameraCapturePage(): JSX.Element {
     inferenceMode,
     captureSource === 'TEMP',
     getSourceFilename,
+    selectedStudentId,
     handleFrameUploadSuccess,
     handleFrameUploadError,
   )
@@ -356,6 +360,31 @@ export function SessionCameraCapturePage(): JSX.Element {
     }
   }, [sessionId, logOffset])
 
+  // Load students in session
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadStudents(): Promise<void> {
+      if (!sessionId) return
+      setLoadingStudents(true)
+      try {
+        const report = await getSessionAttendanceReport(sessionId)
+        if (isMounted) {
+          setEnrolledStudents(report.students || [])
+        }
+      } catch (err) {
+        console.error('Failed to load students:', err)
+      } finally {
+        if (isMounted) setLoadingStudents(false)
+      }
+    }
+
+    void loadStudents()
+    return () => {
+      isMounted = false
+    }
+  }, [sessionId])
+
   const handleStopUploading = useCallback(() => {
     frameUpload.stopUploading()
     setDiagnosticMessage('Capture loop stopped')
@@ -430,7 +459,7 @@ export function SessionCameraCapturePage(): JSX.Element {
       return
     }
 
-    if (typeof intervalMs !== 'number' || intervalMs <= 0) {
+    if (typeof intervalMs !== 'number' || intervalMs < 0) {
       setDiagnosticMessage('Refresh interval is invalid or missing.')
       return
     }
@@ -552,10 +581,19 @@ export function SessionCameraCapturePage(): JSX.Element {
       const result = await uploadAndAnalyzeImage(sessionId, selectedFile, {
         mode: inferenceMode,
         confidence_threshold: 0.5,
+        student_id: selectedStudentId || undefined,
       })
 
       if (result.annotated_image_base64) {
-        setAnnotatedImage(result.annotated_image_base64)
+        const newImage = {
+          url: result.annotated_image_base64,
+          timestamp: new Date(),
+          detections: result.detections,
+        }
+
+        setGalleryImages((prev) => [newImage, ...prev].slice(0, 12))
+        setFeaturedImage(newImage)
+        setAnnotatedImage(newImage.url)
       }
 
       if (result.detections) {
@@ -725,6 +763,32 @@ export function SessionCameraCapturePage(): JSX.Element {
                   Testing
                 </button>
               </div>
+            </div>
+
+            <div className="control-block" style={{ flex: '1 1 100%' }}>
+              <span className="control-label">Target Student</span>
+              <select 
+                className="select-input"
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  borderRadius: '6px', 
+                  border: '1px solid #d6dbe1',
+                  backgroundColor: '#fff',
+                  fontSize: '13px'
+                }}
+                value={selectedStudentId || ''} 
+                onChange={(e) => setSelectedStudentId(e.target.value || null)}
+                disabled={frameUpload.isUploading || uploadProcessing}
+              >
+                <option value="">-- All Students (Auto-Detect / Unknown) --</option>
+                {enrolledStudents.map((s) => (
+                  <option key={s.student_id} value={s.student_id}>
+                    {s.student_name} ({s.student_code})
+                  </option>
+                ))}
+              </select>
+              {loadingStudents && <p className="muted" style={{ fontSize: '10px', marginTop: '4px' }}>Loading student list...</p>}
             </div>
           </div>
 
@@ -976,9 +1040,6 @@ export function SessionCameraCapturePage(): JSX.Element {
       {captureSource === 'TEMP' && (
         <section className="panel">
           <h2>Output Gallery (Temp_output)</h2>
-          <p className="muted">
-            Labeled images saved to <code>backend/app/services/Temp_output</code>
-          </p>
 
           {outputError && (
             <p className="muted">{outputError}</p>

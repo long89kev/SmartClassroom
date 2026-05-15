@@ -105,6 +105,21 @@ function normalizeApiError(error: unknown): string {
   return 'Unknown request error'
 }
 
+/**
+ * Utility to convert a data URI (base64) to a Blob for binary upload.
+ */
+export function dataURLtoBlob(dataurl: string): Blob {
+  const arr = dataurl.split(',')
+  const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg'
+  const bstr = atob(arr[1])
+  let n = bstr.length
+  const u8arr = new Uint8Array(n)
+  while (n--) {
+    u8arr[n] = bstr.charCodeAt(n)
+  }
+  return new Blob([u8arr], { type: mime })
+}
+
 export async function getBuildingsOverview(): Promise<BuildingOverview[]> {
   try {
     const { data } = await api.get<BuildingOverview[]>('/buildings/overview')
@@ -469,7 +484,21 @@ export async function ingestLearningMode(
     source_filename?: string
   },
 ): Promise<LearningModeResponse> {
-  const { data } = await api.post<LearningModeResponse>(`/sessions/${sessionId}/learn`, payload)
+  const formData = new FormData()
+  
+  // Convert base64 to binary blob
+  const imageBlob = dataURLtoBlob(payload.image_base64)
+  formData.append('image', imageBlob, 'frame.jpg')
+  
+  if (payload.student_id) formData.append('student_id', payload.student_id)
+  if (payload.confidence_threshold !== undefined) {
+    formData.append('confidence_threshold', payload.confidence_threshold.toString())
+  }
+  if (payload.source_filename) formData.append('source_filename', payload.source_filename)
+
+  const { data } = await api.post<LearningModeResponse>(`/sessions/${sessionId}/learn`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return data
 }
 
@@ -482,7 +511,21 @@ export async function ingestTestingMode(
     source_filename?: string
   },
 ): Promise<TestingModeResponse> {
-  const { data } = await api.post<TestingModeResponse>(`/sessions/${sessionId}/test`, payload)
+  const formData = new FormData()
+  
+  const imageBlob = dataURLtoBlob(payload.image_base64)
+  formData.append('image', imageBlob, 'frame.jpg')
+  
+  if (payload.confidence_threshold !== undefined) {
+    formData.append('confidence_threshold', payload.confidence_threshold.toString())
+  }
+  if (payload.source_filename) formData.append('source_filename', payload.source_filename)
+  // Note: students_present is currently not handled as a list in the new backend signature 
+  // but student_id: None is passed for testing mode.
+
+  const { data } = await api.post<TestingModeResponse>(`/sessions/${sessionId}/test`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
   return data
 }
 
@@ -564,6 +607,8 @@ export interface UploadAnalyzeResponse {
   annotated_image_base64: string | null
   detections: any[]
   logs_created: number
+  incidents_created: number
+  risk_summary: any | null
 }
 
 export async function uploadAndAnalyzeImage(
@@ -572,6 +617,7 @@ export async function uploadAndAnalyzeImage(
   params?: {
     mode?: 'LEARNING' | 'TESTING'
     confidence_threshold?: number
+    student_id?: string
   },
 ): Promise<UploadAnalyzeResponse> {
   try {

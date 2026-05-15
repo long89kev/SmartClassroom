@@ -212,6 +212,16 @@ CREATE TABLE IF NOT EXISTS behavior_logs (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Processed Frames (Annotated output stream)
+CREATE TABLE IF NOT EXISTS processed_frames (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+  frame_snapshot BYTEA NOT NULL,
+  filename VARCHAR(255),
+  detected_at TIMESTAMP DEFAULT NOW(),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Performance Session Aggregates (Pre-calculated per session per actor)
 CREATE TABLE IF NOT EXISTS performance_aggregates (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -401,7 +411,7 @@ CREATE TABLE IF NOT EXISTS refresh_interval_settings (
   scope_type VARCHAR(20) NOT NULL CHECK (scope_type IN ('GROUP', 'BUILDING', 'ROOM')),
   scope_id VARCHAR(100) NOT NULL,
   mode VARCHAR(20) NOT NULL CHECK (mode IN ('NORMAL', 'TESTING')),
-  interval_ms INT NOT NULL CHECK (interval_ms >= 1000 AND interval_ms <= 120000),
+  interval_ms INT NOT NULL CHECK (interval_ms >= 0 AND interval_ms <= 10000),
   updated_by UUID REFERENCES users(id),
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
@@ -586,6 +596,8 @@ CREATE INDEX idx_enrollments_subject_id ON enrollments(subject_id);
 CREATE INDEX idx_behavior_logs_session_id ON behavior_logs(session_id);
 CREATE INDEX idx_behavior_logs_actor_id ON behavior_logs(actor_id);
 CREATE INDEX idx_behavior_logs_detected_at ON behavior_logs(detected_at);
+CREATE INDEX idx_processed_frames_session_id ON processed_frames(session_id);
+CREATE INDEX idx_processed_frames_detected_at ON processed_frames(detected_at);
 CREATE INDEX idx_class_sessions_room_id ON class_sessions(room_id);
 CREATE INDEX idx_class_sessions_teacher_id ON class_sessions(teacher_id);
 CREATE INDEX idx_class_sessions_start_time ON class_sessions(start_time);
@@ -669,14 +681,14 @@ ON CONFLICT (device_type_code) DO UPDATE SET
 -- Group-level polling interval defaults (fallback chain starts here)
 INSERT INTO refresh_interval_settings (id, scope_type, scope_id, mode, interval_ms, updated_by, created_at, updated_at)
 VALUES
-  (gen_random_uuid(), 'GROUP', 'A', 'NORMAL', 10000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'A', 'TESTING', 3000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'B', 'NORMAL', 10000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'B', 'TESTING', 3000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'C', 'NORMAL', 10000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'C', 'TESTING', 3000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'LABS', 'NORMAL', 10000, NULL, NOW(), NOW()),
-  (gen_random_uuid(), 'GROUP', 'LABS', 'TESTING', 3000, NULL, NOW(), NOW())
+  (gen_random_uuid(), 'GROUP', 'A', 'NORMAL', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'A', 'TESTING', 1000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'B', 'NORMAL', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'B', 'TESTING', 1000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'C', 'NORMAL', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'C', 'TESTING', 1000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'LABS', 'NORMAL', 3000, NULL, NOW(), NOW()),
+  (gen_random_uuid(), 'GROUP', 'LABS', 'TESTING', 1000, NULL, NOW(), NOW())
 ON CONFLICT (scope_type, scope_id, mode) DO UPDATE SET
   interval_ms = EXCLUDED.interval_ms,
   updated_at = NOW();

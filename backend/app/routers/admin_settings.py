@@ -15,11 +15,11 @@ GROUP_KEYS = {"A", "B", "C", "LABS"}
 SCOPE_TYPES = {"GROUP", "BUILDING", "ROOM"}
 MODES = {"NORMAL", "TESTING"}
 FALLBACK_INTERVALS = {
-    "NORMAL": 10000,   # 10 seconds (Learning mode)
-    "TESTING": 3000,   # 3 seconds (Testing mode)
+    "NORMAL": 3000,    # 3 seconds (Learning mode)
+    "TESTING": 1000,   # 1 second (Testing mode)
 }
-MIN_INTERVAL_MS = 1000
-MAX_INTERVAL_MS = 120000
+MIN_INTERVAL_MS = 0
+MAX_INTERVAL_MS = 10000
 
 
 class IntervalUpdatePayload(BaseModel):
