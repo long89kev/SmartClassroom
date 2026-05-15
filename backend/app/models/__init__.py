@@ -151,6 +151,7 @@ class ClassSession(Base):
     aggregates = relationship("PerformanceAggregate", back_populates="session", cascade="all, delete-orphan")
     attendance_config = relationship("AttendanceSessionConfig", back_populates="session", uselist=False, cascade="all, delete-orphan")
     attendance_events = relationship("AttendanceEvent", back_populates="session", cascade="all, delete-orphan")
+    processed_frames = relationship("ProcessedFrame", back_populates="session", cascade="all, delete-orphan")
 
 
 class AttendanceSessionConfig(Base):
@@ -228,6 +229,18 @@ class BehaviorLog(Base):
     created_at = Column(DateTime, server_default=func.now())
     
     session = relationship("ClassSession", back_populates="behavior_logs")
+
+class ProcessedFrame(Base):
+    __tablename__ = "processed_frames"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("class_sessions.id"), nullable=False, index=True)
+    frame_snapshot = Column(LargeBinary, nullable=False) # Annotated image binary
+    filename = Column(String)
+    detected_at = Column(DateTime, server_default=func.now(), index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    
+    session = relationship("ClassSession", back_populates="processed_frames")
 
 class PerformanceAggregate(Base):
     __tablename__ = "performance_aggregates"

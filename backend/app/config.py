@@ -24,10 +24,9 @@ class Settings(BaseSettings):
     yolo_weights_path: str = str(_BACKEND_DIR / "models" / "yolo_weights")
     yolo_confidence_threshold: float = 0.5
 
-    # Temp replay frames (dev only)
-    temp_frames_dir: str = str(_BACKEND_DIR / "app" / "services" / "Temp")
+    # Local storage for temp frames (browsing/replays)
+    temp_frames_dir: str = "app/services/Temp"
     temp_frames_enabled: bool = True
-    temp_output_dir: str = str(_BACKEND_DIR / "app" / "services" / "Temp_output")
     
     # MQTT (Mosquitto Broker in Docker)
     mqtt_broker_host: str = "localhost"

@@ -212,11 +212,11 @@ CREATE TABLE IF NOT EXISTS behavior_logs (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Processed Frames (Annotated output stream)
+-- Processed Frames (Annotated images for replay/history)
 CREATE TABLE IF NOT EXISTS processed_frames (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
-  frame_snapshot BYTEA NOT NULL,
+  frame_snapshot BYTEA NOT NULL, -- Annotated image binary
   filename VARCHAR(255),
   detected_at TIMESTAMP DEFAULT NOW(),
   created_at TIMESTAMP DEFAULT NOW()
@@ -612,6 +612,8 @@ CREATE INDEX idx_attendance_events_created_by_user_id ON attendance_events(creat
 CREATE INDEX idx_attendance_events_session_student_time ON attendance_events(session_id, student_id, occurred_at);
 CREATE INDEX idx_risk_incidents_session_id ON risk_incidents(session_id);
 CREATE INDEX idx_risk_incidents_student_id ON risk_incidents(student_id);
+CREATE INDEX idx_processed_frames_session_id ON processed_frames(session_id);
+CREATE INDEX idx_processed_frames_detected_at ON processed_frames(detected_at);
 CREATE INDEX idx_device_states_room_id ON device_states(room_id);
 CREATE INDEX idx_room_devices_room_id ON room_devices(room_id);
 CREATE INDEX idx_room_devices_device_type ON room_devices(device_type);

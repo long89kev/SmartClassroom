@@ -486,7 +486,8 @@ class YOLOInferenceService:
             out_name = f"{stem}.png"
 
         out_path = output_dir / out_name
-        image.save(out_path, format=save_format)
+        out_path = output_dir / filename
+        image.save(out_path)
         logger.info("Saved annotated image to %s", out_path)
         return out_path
 
@@ -525,6 +526,7 @@ class YOLOInferenceService:
             if not skip_annotation:
                 annotated_image = self.annotate_image(image, detections)
 
+                # Save annotated image ONLY if output_dir is explicitly provided
                 if output_dir and source_filename:
                     try:
                         saved_path = self.save_annotated_image(

@@ -8,7 +8,7 @@ import base64
 
 from app.config import get_settings
 from app.database import get_db, SessionLocal
-from app.models import ClassSession, Room, Teacher, Subject, Timetable, BehaviorLog, RiskIncident, PerformanceAggregate, User
+from app.models import ClassSession, Room, Teacher, Subject, Timetable, BehaviorLog, RiskIncident, PerformanceAggregate, User, ProcessedFrame
 from app.schemas.common import (
     SessionCreate, SessionResponse, SessionModeChange, 
     BehaviorIngest, SessionAnalyticsResponse,
@@ -55,6 +55,8 @@ def _finalize_learning_ingest(
     subject_id: UUID,
     detections: List[Dict],
     snapshot_bytes: Optional[bytes],
+    annotated_image_base64: Optional[str] = None,
+    filename: Optional[str] = None,
     student_id_override: Optional[UUID] = None,
 ):
     """Background task to persist behavior logs and update performance scores."""
@@ -76,6 +78,23 @@ def _finalize_learning_ingest(
                 detected_at=datetime.utcnow()
             )
             db.add(log)
+        
+        # 1.5 Store annotated frame for replay/history
+        if annotated_image_base64:
+            try:
+                b64_data = annotated_image_base64.split(",")[1] if "," in annotated_image_base64 else annotated_image_base64
+                annotated_bytes = base64.b64decode(b64_data)
+                
+                new_frame = ProcessedFrame(
+                    session_id=session_id,
+                    frame_snapshot=annotated_bytes,
+                    filename=filename,
+                    detected_at=datetime.utcnow()
+                )
+                db.add(new_frame)
+            except Exception as fe:
+                logger.error("[Background] Failed to save processed frame: %s", fe)
+
         db.commit()
 
         # 2. Update performance scores
@@ -132,6 +151,23 @@ def _finalize_testing_ingest(
                 detected_at=datetime.utcnow()
             )
             db.add(log)
+        
+        # 1.5 Store annotated frame for replay/history
+        if annotated_image_base64:
+            try:
+                b64_data = annotated_image_base64.split(",")[1] if "," in annotated_image_base64 else annotated_image_base64
+                annotated_bytes = base64.b64decode(b64_data)
+                
+                new_frame = ProcessedFrame(
+                    session_id=session_id,
+                    frame_snapshot=annotated_bytes,
+                    filename=f"testing_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.jpg",
+                    detected_at=datetime.utcnow()
+                )
+                db.add(new_frame)
+            except Exception as fe:
+                logger.error("[Background] Failed to save processed frame: %s", fe)
+
         db.commit()
 
         # 2. Analyze risk and create incidents
@@ -805,9 +841,6 @@ async def ingest_learning_mode(
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
 
-        settings = get_settings()
-        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
-        
         # Read raw binary bytes directly from the upload
         image_bytes = await image.read()
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -821,7 +854,7 @@ async def ingest_learning_mode(
             conf_threshold=confidence_threshold,
             student_id=student_id,
             mode="LEARNING",
-            output_dir=output_dir,
+            output_dir=None,
             source_filename=resolved_source_filename,
         )
         
@@ -832,6 +865,8 @@ async def ingest_learning_mode(
             subject_id=session.subject_id,
             detections=frame_result["detections"],
             snapshot_bytes=image_bytes,
+            annotated_image_base64=frame_result["annotated_image_base64"],
+            filename=resolved_source_filename,
             student_id_override=student_id
         )
 
@@ -886,9 +921,6 @@ async def ingest_testing_mode(
         if not yolo_service.is_ready():
             raise HTTPException(status_code=503, detail="YOLO model not loaded")
         
-        settings = get_settings()
-        output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
-        
         # Read raw binary bytes
         image_bytes = await image.read()
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -902,7 +934,7 @@ async def ingest_testing_mode(
             conf_threshold=confidence_threshold,
             student_id=None,
             mode="TESTING",
-            output_dir=output_dir,
+            output_dir=None,
             source_filename=resolved_source_filename,
         )
         
@@ -1188,9 +1220,7 @@ async def get_temp_output_frame(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Browse annotated output frames from Temp_output directory."""
-    settings = get_settings()
-
+    """Browse annotated output frames from processed_frames database table."""
     _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
@@ -1201,38 +1231,33 @@ async def get_temp_output_frame(
     if index < 0:
         raise HTTPException(status_code=400, detail="Index must be >= 0")
 
-    sort_key = sort.strip().lower() if sort else "name"
-    if sort_key not in {"name", "mtime"}:
-        raise HTTPException(status_code=400, detail="Sort must be name or mtime")
+    # Fetch frames from DB ordered by detected_at
+    query = db.query(ProcessedFrame).filter(ProcessedFrame.session_id == session_id)
+    total = query.count()
+    
+    if total == 0:
+        raise HTTPException(status_code=404, detail="No annotated output frames available in database")
 
-    output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
-    frames = _list_temp_frames(output_dir, sort_key)
-
-    if not frames:
-        raise HTTPException(status_code=404, detail="No annotated output frames available")
-
-    if index >= len(frames):
+    if index >= total:
         raise HTTPException(
             status_code=400,
-            detail=f"Index out of range (max {len(frames) - 1})",
+            detail=f"Index out of range (max {total - 1})",
         )
 
-    frame_path = frames[index]
-    try:
-        image_bytes = frame_path.read_bytes()
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read output frame: {exc}")
+    # Get specific frame by index
+    # Note: Using offset for index-based browsing to match existing frontend expectations
+    frame = query.order_by(ProcessedFrame.detected_at.asc()).offset(index).first()
+    
+    if not frame:
+        raise HTTPException(status_code=404, detail="Frame not found")
 
-    mime_type = _resolve_image_mime(frame_path)
-    encoded = base64.b64encode(image_bytes).decode("utf-8")
-    image_base64 = f"data:{mime_type};base64,{encoded}"
-
-    next_index = index + 1 if index + 1 < len(frames) else None
+    image_base64 = _serialize_frame_snapshot(frame.frame_snapshot)
+    next_index = index + 1 if index + 1 < total else None
 
     return TempOutputFrameResponse(
         index=index,
-        total=len(frames),
-        filename=frame_path.name,
+        total=total,
+        filename=frame.filename or f"frame_{frame.id}.jpg",
         image_base64=image_base64,
         has_next=next_index is not None,
         next_index=next_index,
@@ -1249,11 +1274,9 @@ async def run_temp_batch_inference(
 ):
     """
     Batch process ALL Temp images through YOLO inference.
-    Reads from Temp/, runs YOLO, saves labeled images to Temp_output/.
+    Reads from Temp/, runs YOLO, saves results to ProcessedFrame table.
     Returns processing results with annotated image count.
     """
-    settings = get_settings()
-
     _ensure_session_permissions(current_user, db, {"camera:view_live", "camera:view_recorded"})
 
     session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
@@ -1264,9 +1287,8 @@ async def run_temp_batch_inference(
     if not yolo_service.is_ready():
         raise HTTPException(status_code=503, detail="YOLO model not loaded")
 
-    # Read all input frames
-    input_dir = _resolve_temp_frames_dir(settings.temp_frames_dir)
-    output_dir = _resolve_temp_frames_dir(settings.temp_output_dir)
+    # Read all input frames from local Temp folder
+    input_dir = _resolve_temp_frames_dir(get_settings().temp_frames_dir)
     input_frames = _list_temp_frames(input_dir, "name")
 
     if not input_frames:
@@ -1278,6 +1300,7 @@ async def run_temp_batch_inference(
 
     results = []
     errors = []
+    last_annotated_base64 = None
 
     for frame_path in input_frames:
         try:
@@ -1291,14 +1314,27 @@ async def run_temp_batch_inference(
                 conf_threshold=confidence_threshold,
                 student_id=None,
                 mode=resolved_mode,
-                output_dir=output_dir,
+                output_dir=None, # DB storage
                 source_filename=frame_path.name,
             )
+            
+            # Persist to DB immediately
+            annotated_b64 = frame_result.get("annotated_image_base64")
+            if annotated_b64:
+                b64_data = annotated_b64.split(",")[1] if "," in annotated_b64 else annotated_b64
+                new_frame = ProcessedFrame(
+                    session_id=session_id,
+                    frame_snapshot=base64.b64decode(b64_data),
+                    filename=frame_path.name,
+                    detected_at=datetime.utcnow()
+                )
+                db.add(new_frame)
+                last_annotated_base64 = annotated_b64
 
             results.append({
                 "filename": frame_path.name,
                 "detection_count": frame_result["detection_count"],
-                "saved_output_path": frame_result.get("saved_output_path"),
+                "saved_to_db": True
             })
         except Exception as e:
             errors.append({
@@ -1306,17 +1342,7 @@ async def run_temp_batch_inference(
                 "error": str(e),
             })
 
-    # Return the last annotated image as the preview
-    last_annotated_base64 = None
-    if results:
-        last_output = output_dir / results[-1]["filename"]
-        if last_output.exists():
-            try:
-                out_bytes = last_output.read_bytes()
-                out_mime = _resolve_image_mime(last_output)
-                last_annotated_base64 = f"data:{out_mime};base64,{base64.b64encode(out_bytes).decode('utf-8')}"
-            except Exception:
-                pass
+    db.commit()
 
     return {
         "total_input": len(input_frames),

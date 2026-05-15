@@ -73,14 +73,8 @@ async def startup_event():
             logger.warning("  - Continuing without YOLO")
     except Exception as e:
         logger.error(f"✗ YOLO Startup Error: {e}")
-    # Log temp_output_dir resolution for debugging
-    try:
-        temp_dir = Path(settings.temp_output_dir)
-        repo_root = Path(__file__).resolve().parents[2]
-        resolved = temp_dir if temp_dir.is_absolute() else repo_root.joinpath(temp_dir)
-        logger.info("Temp output dir: %s (exists=%s)", resolved, resolved.exists())
-    except Exception as e:
-        logger.debug("Failed to resolve temp_output_dir: %s", e)
+    # Log YOLO weights path for debugging
+    logger.info("YOLO weights path: %s", settings.yolo_weights_path)
     
     # Database status and seeding
     try:
