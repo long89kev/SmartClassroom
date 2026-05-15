@@ -55,11 +55,6 @@ def export_models():
             # simplify=True can help with onnxruntime compatibility
             onnx_path = model.export(format="onnx", imgsz=640, dynamic=True, opset=12, simplify=True)
             logger.info(f"Successfully exported {model_key} to ONNX: {onnx_path}")
-            
-            logger.info(f"Exporting {model_key} to OpenVINO format (INT8)...")
-            # Export to OpenVINO with INT8 quantization for Intel CPUs
-            ov_path = model.export(format="openvino", imgsz=640, int8=True)
-            logger.info(f"Successfully exported {model_key} to OpenVINO: {ov_path}")
         except Exception as e:
             logger.error(f"Failed to export {model_key}: {e}")
 

@@ -1,0 +1,24 @@
+description: Ultralytics YOLO26s model trained on training_results/datasets/discuss/split/dataset.yaml
+author: Ultralytics
+date: '2026-05-15T20:10:36.409240'
+version: 8.4.50
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: discuss
+args:
+  data: coco8.yaml
+  batch: 1
+  fraction: 1.0
+  half: false
+  int8: true
+  dynamic: false
+  nms: false
+channels: 3
+end2end: true

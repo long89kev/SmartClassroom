@@ -1,0 +1,26 @@
+description: Ultralytics YOLO26s model trained on training_results/datasets/handrise/split/dataset.yaml
+author: Ultralytics
+date: '2026-05-15T20:10:50.977808'
+version: 8.4.50
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: hand-raising
+  1: read
+  2: write
+args:
+  data: coco8.yaml
+  batch: 1
+  fraction: 1.0
+  half: false
+  int8: true
+  dynamic: false
+  nms: false
+channels: 3
+end2end: true

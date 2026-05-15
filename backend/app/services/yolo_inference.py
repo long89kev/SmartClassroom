@@ -77,35 +77,18 @@ class YOLOInferenceService:
 
     MODEL_SPECS: List[Dict[str, Any]] = [
         {
-            "model_key": "student_bow_turn",
+            "model_key": "student_bow_turn_discuss",
             "actor_type": "STUDENT",
             "weight_candidates": [
-                ["backend", "models", "yolo_weights", "student_bow_turn", "best.onnx"],
-                ["backend", "models", "yolo_weights", "student_bow_turn", "best.pt"],
-                ["backend", "models", "yolo_weights", "student_bow_turn", "exp", "weights", "best.pt"],
-                ["backend", "models", "yolo_weights", "student_bow_turn", "exp", "exp", "weights", "best.pt"],
-                ["models", "yolo_weights", "student_bow_turn", "best.onnx"],
-                ["models", "yolo_weights", "student_bow_turn", "best.pt"],
-                ["models", "yolo_weights", "student_bow_turn", "exp", "weights", "best.pt"],
+                ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.onnx"],
+                ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.pt"],
+                ["models", "yolo_weights", "student_bow_turn_discuss", "best.onnx"],
+                ["models", "yolo_weights", "student_bow_turn_discuss", "best.pt"],
             ],
-            "class_names": ["BowHead", "TurnHead"],
+            "class_names": ["BowHead", "TurnHead", "discuss"],
             "class_map": {
                 "BowHead": "BOW_THE_HEAD",
                 "TurnHead": "TURN_THE_HEAD",
-            },
-        },
-        {
-            "model_key": "student_discuss",
-            "actor_type": "STUDENT",
-            "weight_candidates": [
-                ["backend", "models", "yolo_weights", "student_discuss", "best.onnx"],
-                ["backend", "models", "yolo_weights", "student_discuss", "best.pt"],
-                ["backend", "models", "yolo_weights", "student_discuss", "exp", "weights", "best.pt"],
-                ["models", "yolo_weights", "student_discuss", "best.onnx"],
-                ["models", "yolo_weights", "student_discuss", "best.pt"],
-            ],
-            "class_names": ["discuss"],
-            "class_map": {
                 "discuss": "DISCUSS",
             },
         },
@@ -251,10 +234,9 @@ class YOLOInferenceService:
 
     def _models_for_mode(self, mode: str) -> List[str]:
         if mode == "TESTING":
-            return ["student_bow_turn", "student_discuss", "teacher_behavior"]
+            return ["student_bow_turn_discuss", "teacher_behavior"]
         return [
-            "student_bow_turn",
-            "student_discuss",
+            "student_bow_turn_discuss",
             "student_hand_read_write",
             "teacher_behavior",
         ]
