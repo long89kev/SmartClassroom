@@ -296,7 +296,8 @@ class YOLOInferenceService:
             # Pre-resize a copy once so each model receives an already-correct-sized
             # image, avoiding redundant resize operations across multiple models.
             inference_image = image
-            scale_factor = 1.0
+            scale_x = 1.0
+            scale_y = 1.0
             
             if max(image.size) > self.INFERENCE_IMGSZ:
                 inference_image = image.copy()
@@ -304,8 +305,9 @@ class YOLOInferenceService:
                     (self.INFERENCE_IMGSZ, self.INFERENCE_IMGSZ),
                     Image.LANCZOS,
                 )
-                resized_w, _ = inference_image.size
-                scale_factor = orig_w / resized_w
+                resized_w, resized_h = inference_image.size
+                scale_x = orig_w / resized_w
+                scale_y = orig_h / resized_h
 
             allowed_labels = self._allowed_labels_for_mode(mode)
             enabled_model_keys = self._models_for_mode(mode)
@@ -329,7 +331,8 @@ class YOLOInferenceService:
                             inference_image,
                             allowed_labels,
                             conf_threshold,
-                            scale_factor,
+                            scale_x,
+                            scale_y,
                             orig_w,
                             orig_h
                         )
@@ -360,7 +363,8 @@ class YOLOInferenceService:
         inference_image: Image.Image,
         allowed_labels: set,
         conf_threshold: float,
-        scale_factor: float,
+        scale_x: float,
+        scale_y: float,
         orig_w: int,
         orig_h: int
     ) -> List[Dict]:
@@ -395,7 +399,17 @@ class YOLOInferenceService:
                     continue
 
                 # Map coordinates back to the original image space
-                x1, y1, x2, y2 = [coord * scale_factor for coord in box.xyxy[0].tolist()]
+                raw = box.xyxy[0].tolist()
+                x1 = raw[0] * scale_x
+                y1 = raw[1] * scale_y
+                x2 = raw[2] * scale_x
+                y2 = raw[3] * scale_y
+
+                # Clamp to image bounds
+                x1 = max(0, min(x1, orig_w))
+                y1 = max(0, min(y1, orig_h))
+                x2 = max(0, min(x2, orig_w))
+                y2 = max(0, min(y2, orig_h))
 
                 detection = {
                     "behavior_class": behavior_class,
@@ -410,7 +424,7 @@ class YOLOInferenceService:
                         round((x2 - x1) / orig_w, 3),
                         round((y2 - y1) / orig_h, 3),
                     ],
-                    "bbox_pixels": [x1, y1, x2, y2],
+                    "bbox_pixels": [round(x1), round(y1), round(x2), round(y2)],
                     "student_id": "temp" # Will be finalized in run_inference
                 }
                 model_detections.append(detection)
