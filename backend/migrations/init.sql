@@ -612,8 +612,6 @@ CREATE INDEX idx_attendance_events_created_by_user_id ON attendance_events(creat
 CREATE INDEX idx_attendance_events_session_student_time ON attendance_events(session_id, student_id, occurred_at);
 CREATE INDEX idx_risk_incidents_session_id ON risk_incidents(session_id);
 CREATE INDEX idx_risk_incidents_student_id ON risk_incidents(student_id);
-CREATE INDEX idx_processed_frames_session_id ON processed_frames(session_id);
-CREATE INDEX idx_processed_frames_detected_at ON processed_frames(detected_at);
 CREATE INDEX idx_device_states_room_id ON device_states(room_id);
 CREATE INDEX idx_room_devices_room_id ON room_devices(room_id);
 CREATE INDEX idx_room_devices_device_type ON room_devices(device_type);
