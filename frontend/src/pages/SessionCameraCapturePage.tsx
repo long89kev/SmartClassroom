@@ -1033,18 +1033,18 @@ export function SessionCameraCapturePage(): JSX.Element {
           </div>
 
           <div style={{ 
-            marginTop: '20px', 
-            fontSize: '13px', 
-            lineHeight: '1.4',
+            marginTop: '24px', 
+            fontSize: '15px', 
+            lineHeight: '1.6',
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
-            gap: '8px 24px',
+            gap: '12px 40px',
             borderTop: '1px solid #f0f0f0',
-            paddingTop: '16px'
+            paddingTop: '24px'
           }}>
             <p style={{ margin: 0 }}>
               <strong>Status:</strong>{' '}
-              <span style={{ color: '#2e8b4e' }}>
+              <span style={{ color: '#2e8b4e', fontWeight: 600 }}>
                 {batchProcessing ? 'Batch Processing...' : uploadProcessing ? 'Analyzing...' : frameUpload.isUploading ? 'Capturing' : 'Idle'}
               </span>
             </p>
@@ -1070,8 +1070,8 @@ export function SessionCameraCapturePage(): JSX.Element {
               <strong>Uploaded:</strong> {frameUpload.framesUploaded}
             </p>
             {diagnosticMessage && (
-              <p className="muted" style={{ margin: 0, gridColumn: 'span 2' }}>
-                <strong>Diag:</strong> {diagnosticMessage}
+              <p className="muted" style={{ margin: 0, gridColumn: 'span 2', fontSize: '13px', borderTop: '1px dashed #eee', paddingTop: '12px', marginTop: '4px' }}>
+                <strong>Diagnostic:</strong> {diagnosticMessage}
               </p>
             )}
             {batchResult && (
@@ -1087,7 +1087,7 @@ export function SessionCameraCapturePage(): JSX.Element {
           </div>
         </article>
 
-        <article className="panel">
+        <article className="panel" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h2 style={{ margin: 0 }}>Annotated Preview</h2>
             {featuredImage && (
@@ -1097,7 +1097,7 @@ export function SessionCameraCapturePage(): JSX.Element {
             )}
           </div>
 
-          <div className="preview-container">
+          <div className="preview-container" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
             {featuredImage ? (
               <div className="featured-view" style={{ marginBottom: '1.5rem' }}>
                 <img 
@@ -1129,15 +1129,16 @@ export function SessionCameraCapturePage(): JSX.Element {
               </div>
             )}
 
-            <div className="gallery-section">
+            <div className="gallery-section" style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
               <h4 style={{ marginBottom: '0.75rem', fontSize: '14px', borderBottom: '1px solid #eee', paddingBottom: '4px' }}>History</h4>
               <div className="image-gallery" style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(4, 1fr)', 
                 gap: '8px',
-                maxHeight: '300px',
+                flex: 1,
                 overflowY: 'auto',
-                padding: '4px'
+                padding: '4px',
+                minHeight: '200px'
               }}>
                 {galleryImages.map((img, idx) => (
                   <div 
@@ -1150,10 +1151,11 @@ export function SessionCameraCapturePage(): JSX.Element {
                       overflow: 'hidden',
                       border: featuredImage?.url === img.url ? '2px solid #2e8b4e' : '2px solid transparent',
                       position: 'relative',
-                      transition: 'transform 0.2s'
+                      transition: 'transform 0.2s',
+                      aspectRatio: '16/9'
                     }}
                   >
-                    <img src={img.url} alt={`Frame ${idx}`} style={{ width: '100%', display: 'block' }} />
+                    <img src={img.url} alt={`Frame ${idx}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
                     <div style={{ 
                       position: 'absolute', 
                       bottom: 0, 
@@ -1235,31 +1237,14 @@ export function SessionCameraCapturePage(): JSX.Element {
             </div>
           )}
         </section>
-      )}
-
-      {reviewMode && pendingApprovals.length > 0 && (
-        <section className="panel" style={{ border: '2px solid #eab308' }}>
+      )}      {reviewMode && pendingApprovals.length > 0 && (
+        <section className="panel" style={{ border: '1px solid #e0e0e0', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <h2 style={{ color: '#ca8a04', margin: 0 }}>Pending Approvals ({pendingApprovals.length})</h2>
+              <h2 style={{ color: '#2e8b4e', margin: 0 }}>Pending Approvals ({pendingApprovals.length})</h2>
               <span style={{ fontSize: '12px', color: '#a1a1aa' }}>Focus Mode</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button 
-                className="header-nav-link" 
-                style={{ color: '#16a34a', backgroundColor: '#dcfce7', padding: '6px 12px', borderRadius: '6px' }}
-                onClick={handleConfirmAll}
-              >
-                <Check size={16} /> Confirm All
-              </button>
-              <button 
-                className="header-nav-link" 
-                style={{ color: '#dc2626', backgroundColor: '#fee2e2', padding: '6px 12px', borderRadius: '6px' }}
-                onClick={handleRejectAll}
-              >
-                <X size={16} /> Reject All
-              </button>
-            </div>
+            {/* Header buttons removed, moved to sidebar split-buttons */}
           </div>
           
           {/* Active Review Panel */}
@@ -1267,19 +1252,20 @@ export function SessionCameraCapturePage(): JSX.Element {
             const activeFrame = pendingApprovals[0];
             return (
               <div style={{ display: 'flex', gap: '24px', backgroundColor: '#fafafa', border: '1px solid #e4e4e7', borderRadius: '8px', padding: '16px' }}>
-                {/* Left Side: Large Image */}
-                <div style={{ flex: '1 1 60%', minWidth: 0 }}>
+                {/* Left Side: Large Image (Increased to 70%) */}
+                <div style={{ flex: '1 1 70%', minWidth: 0 }}>
                   <img src={activeFrame.annotated_image_base64} alt="Active pending frame" style={{ width: '100%', borderRadius: '8px', display: 'block', border: '1px solid #e4e4e7' }} />
                 </div>
                 
-                {/* Right Side: Details & Actions */}
-                <div style={{ flex: '1 1 40%', display: 'flex', flexDirection: 'column' }}>
-                  <h3 style={{ marginTop: 0, marginBottom: '8px', color: '#18181b' }}>Review Required</h3>
+                {/* Right Side: Details & Actions (Decreased to 30%) */}
+                <div style={{ flex: '1 1 30%', display: 'flex', flexDirection: 'column' }}>
+                  <h3 style={{ marginTop: 0, marginBottom: '4px', color: '#18181b' }}>Review Required</h3>
                   <div style={{ fontSize: '13px', color: '#71717a', marginBottom: '16px' }}>
                     {activeFrame.timestamp.toLocaleTimeString()} • {activeFrame.mode}
                   </div>
                   
-                  <div style={{ flex: 1, overflowY: 'auto', marginBottom: '24px' }}>
+                  <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px' }}>
+                    <h4 style={{ fontSize: '12px', color: '#71717a', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Detections</h4>
                     {activeFrame.detections.length > 0 ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                         {Object.entries(
@@ -1293,113 +1279,137 @@ export function SessionCameraCapturePage(): JSX.Element {
                             alignItems: 'center',
                             backgroundColor: '#f4f4f5',
                             color: '#3f3f46',
-                            padding: '6px 12px',
-                            borderRadius: '20px',
-                            fontSize: '13px',
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
                             fontWeight: 600,
-                            border: '1px solid #e4e4e7',
-                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                            border: '1px solid #e4e4e7'
                           }}>
-                            {behavior} 
-                            <span style={{ 
-                              marginLeft: '8px', 
-                              backgroundColor: '#e4e4e7', 
-                              color: '#52525b', 
-                              padding: '2px 8px', 
-                              borderRadius: '10px', 
-                              fontSize: '11px',
-                              fontWeight: 700
-                            }}>
-                              {count as number}
-                            </span>
+                            {behavior} <span style={{ marginLeft: '6px', opacity: 0.6 }}>{count as number}</span>
                           </span>
                         ))}
                       </div>
                     ) : (
                       <p style={{ fontSize: '14px', color: '#a1a1aa', margin: 0 }}>No behaviors detected.</p>
                     )}
+
+                    {/* Up Next moved inside right panel */}
+                    {pendingApprovals.length > 1 && (
+                      <div style={{ marginTop: '24px' }}>
+                        <h4 style={{ fontSize: '12px', color: '#71717a', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Up Next ({pendingApprovals.length - 1})</h4>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
+                          {pendingApprovals.slice(1, 5).map((frame) => (
+                            <div key={frame.id} style={{ opacity: 0.6 }}>
+                              <img 
+                                src={frame.annotated_image_base64} 
+                                alt="Thumbnail" 
+                                style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e4e4e7' }} 
+                              />
+                            </div>
+                          ))}
+                          {pendingApprovals.length > 5 && (
+                            <div style={{ 
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                              backgroundColor: '#f4f4f5', borderRadius: '4px', border: '1px solid #e4e4e7',
+                              fontSize: '11px', color: '#71717a'
+                            }}>
+                              +{pendingApprovals.length - 5} more
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '12px', marginTop: 'auto' }}>
-                    <button 
-                      style={{ 
-                        flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: '#16a34a', padding: '12px', fontSize: '15px', fontWeight: 'bold',
-                        border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.2)'
-                      }}
-                      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#15803d'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                      onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                      onClick={() => handleConfirmPending(activeFrame)}
-                    >
-                      <Check size={20} style={{ marginRight: '8px' }} /> Confirm Frame
-                    </button>
-                    <button 
-                      style={{ 
-                        flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        backgroundColor: '#dc2626', padding: '12px', fontSize: '15px', fontWeight: 'bold',
-                        border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(220, 38, 38, 0.2)'
-                      }}
-                      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                      onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#dc2626'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                      onClick={() => handleRejectPending(activeFrame.id)}
-                    >
-                      <X size={20} style={{ marginRight: '8px' }} /> Reject
-                    </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: 'auto' }}>
+                    {/* Confirm Split Button */}
+                    <div style={{ display: 'flex', gap: '2px', overflow: 'hidden', borderRadius: '8px' }}>
+                      <button 
+                        style={{ 
+                          flex: 3, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: '#16a34a', padding: '12px', fontSize: '14px', fontWeight: 'bold',
+                          border: 'none', cursor: 'pointer'
+                        }}
+                        onClick={() => handleConfirmPending(activeFrame)}
+                      >
+                        <Check size={18} style={{ marginRight: '8px' }} /> Confirm Frame
+                      </button>
+                      <button 
+                        style={{ 
+                          flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: '#15803d', padding: '12px', fontSize: '12px', fontWeight: 'bold',
+                          border: 'none', cursor: 'pointer'
+                        }}
+                        onClick={handleConfirmAll}
+                        title="Confirm All Pending Frames"
+                      >
+                        All
+                      </button>
+                    </div>
+
+                    {/* Reject Split Button */}
+                    <div style={{ display: 'flex', gap: '2px', overflow: 'hidden', borderRadius: '8px' }}>
+                      <button 
+                        style={{ 
+                          flex: 3, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: '#dc2626', padding: '12px', fontSize: '14px', fontWeight: '500',
+                          border: 'none', cursor: 'pointer'
+                        }}
+                        onClick={() => handleRejectPending(activeFrame.id)}
+                      >
+                        <X size={18} style={{ marginRight: '8px' }} /> Reject
+                      </button>
+                      <button 
+                        style={{ 
+                          flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: '#b91c1c', padding: '12px', fontSize: '12px', fontWeight: '500',
+                          border: 'none', cursor: 'pointer'
+                        }}
+                        onClick={handleRejectAll}
+                        title="Reject All Pending Frames"
+                      >
+                        All
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
             );
           })()}
-
-          {/* Up Next Thumbnails */}
-          {pendingApprovals.length > 1 && (
-            <div style={{ marginTop: '16px' }}>
-              <h4 style={{ fontSize: '13px', color: '#71717a', marginBottom: '8px' }}>Up Next ({pendingApprovals.length - 1})</h4>
-              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
-                {pendingApprovals.slice(1).map((frame) => (
-                  <div key={frame.id} style={{ flex: '0 0 100px', opacity: 0.7 }}>
-                    <img 
-                      src={frame.annotated_image_base64} 
-                      alt="Thumbnail" 
-                      style={{ width: '100px', height: '56px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e4e4e7' }} 
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </section>
       )}
 
-      <section className="panel">
-        <h2>Latest Detections ({lastDetections.length})</h2>
-        {lastDetections.length > 0 ? (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Behavior Class</th>
-                  <th>Confidence</th>
-                  <th>Actor Type</th>
-                  <th>Source Model</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lastDetections.map((det, idx) => (
-                  <tr key={idx}>
-                    <td>{det.behavior_class}</td>
-                    <td>{(det.confidence * 100).toFixed(1)}%</td>
-                    <td>{det.actor_type || '-'}</td>
-                    <td>{det.source_model || '-'}</td>
+      {!reviewMode && (
+        <section className="panel">
+          <h2>Latest Detections ({lastDetections.length})</h2>
+          {lastDetections.length > 0 ? (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Behavior Class</th>
+                    <th>Confidence</th>
+                    <th>Actor Type</th>
+                    <th>Source Model</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="muted">No detections yet. Start capturing to see results.</p>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {lastDetections.map((det, idx) => (
+                    <tr key={idx}>
+                      <td>{det.behavior_class}</td>
+                      <td>{(det.confidence * 100).toFixed(1)}%</td>
+                      <td>{det.actor_type || '-'}</td>
+                      <td>{det.source_model || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted">No detections yet. Start capturing to see results.</p>
+          )}
+        </section>
+      )}
 
       <section className="panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
