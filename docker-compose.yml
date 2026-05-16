@@ -75,7 +75,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: doai_backend
-    mem_limit: 1536m
+    mem_limit: 2g
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-doai_user}:${POSTGRES_PASSWORD:-doai_password}@postgres:5432/${POSTGRES_DB:-doai_classroom}
       REDIS_URL: redis://redis:6379/0
