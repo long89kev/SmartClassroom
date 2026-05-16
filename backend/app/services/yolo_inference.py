@@ -37,6 +37,56 @@ class YOLOInferenceService:
     _os.environ.setdefault("NUMEXPR_NUM_THREADS", _INTRA_THREADS)
     _os.environ.setdefault("OPENBLAS_NUM_THREADS", _INTRA_THREADS)
 
+    @classmethod
+    def _detect_device(cls) -> str:
+        """Detect the best available inference device.
+
+        Checks the ``YOLO_DEVICE`` environment variable first:
+          - ``auto`` (default) — use CUDA if available, else CPU
+          - ``cpu``            — force CPU
+          - ``cuda`` / ``cuda:0`` / ``cuda:1`` — force a specific GPU
+
+        Falls back gracefully to CPU when CUDA is requested but unavailable.
+        """
+        import os
+        requested = os.environ.get("YOLO_DEVICE", "auto").strip().lower()
+
+        if requested == "cpu":
+            logger.info("YOLO_DEVICE=cpu — forcing CPU inference")
+            return "cpu"
+
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+        except ImportError:
+            cuda_available = False
+
+        if requested.startswith("cuda"):
+            if cuda_available:
+                # Validate specific device index if provided (e.g. "cuda:1")
+                if ":" in requested:
+                    idx = int(requested.split(":")[1])
+                    if idx < torch.cuda.device_count():
+                        logger.info("YOLO_DEVICE=%s — using GPU %s (%s)",
+                                    requested, idx, torch.cuda.get_device_name(idx))
+                        return requested
+                    logger.warning("YOLO_DEVICE=%s but only %d GPU(s) found — falling back to cuda:0",
+                                   requested, torch.cuda.device_count())
+                    return "cuda:0"
+                logger.info("YOLO_DEVICE=cuda — using GPU 0 (%s)", torch.cuda.get_device_name(0))
+                return "cuda:0"
+            logger.warning("YOLO_DEVICE=%s but CUDA not available — falling back to CPU", requested)
+            return "cpu"
+
+        # "auto" mode
+        if cuda_available:
+            gpu_name = torch.cuda.get_device_name(0)
+            logger.info("Auto-detected NVIDIA GPU: %s — using CUDA", gpu_name)
+            return "cuda:0"
+
+        logger.info("No CUDA GPU detected — using CPU inference")
+        return "cpu"
+
     LEARNING_STUDENT_LABELS = {
         "HAND_RAISING",
         "READ",
@@ -130,6 +180,9 @@ class YOLOInferenceService:
     ]
 
     def __init__(self):
+        self._device = self._detect_device()
+        logger.info("YOLO inference device: %s", self._device)
+
         self.models: Dict[str, Dict[str, Any]] = {}
         try:
             for spec in self.MODEL_SPECS:
@@ -382,6 +435,7 @@ class YOLOInferenceService:
             imgsz=self.INFERENCE_IMGSZ,
             verbose=False,
             classes=allowed_ids,
+            device=self._device,
         )
         
         class_names = model_entry["class_names"]

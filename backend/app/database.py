@@ -8,7 +8,7 @@ settings = get_settings()
 # Create engine
 engine = create_engine(
     settings.database_url,
-    echo=settings.debug,
+    echo=False,  # Set True only to debug SQL queries; was settings.debug
     pool_pre_ping=True,  # Verify connection before using
     pool_size=10,
     max_overflow=20,

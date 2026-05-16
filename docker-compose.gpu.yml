@@ -1,0 +1,31 @@
+# ──────────────────────────────────────────────────────────────
+# docker-compose.gpu.yml — GPU override for the backend service
+# ──────────────────────────────────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Prerequisites:
+#   - NVIDIA GPU (RTX 3060 / driver 566.36 tested)
+#   - NVIDIA Container Toolkit installed (Linux) or Docker Desktop with
+#     WSL2 backend (Windows)
+#   - Verify with: docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+# ──────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
+    environment:
+      # Let the inference service auto-detect GPU; override with "cpu" to force CPU
+      YOLO_DEVICE: ${YOLO_DEVICE:-auto}
+      # NVIDIA runtime env vars (informational — set automatically by the toolkit)
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
