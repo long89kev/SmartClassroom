@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile,
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import Any, List, Optional, Dict
+from pydantic import BaseModel
 from datetime import datetime, time
 from pathlib import Path
 import base64
@@ -819,6 +820,7 @@ async def ingest_learning_mode(
     confidence_threshold: float = Form(0.5),
     student_id: Optional[UUID] = Form(None),
     source_filename: Optional[str] = Form(None),
+    dry_run: bool = Form(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -858,17 +860,18 @@ async def ingest_learning_mode(
             source_filename=resolved_source_filename,
         )
         
-        # Offload DB persistence and scoring to background
-        background_tasks.add_task(
-            _finalize_learning_ingest,
-            session_id=session_id,
-            subject_id=session.subject_id,
-            detections=frame_result["detections"],
-            snapshot_bytes=image_bytes,
-            annotated_image_base64=frame_result["annotated_image_base64"],
-            filename=resolved_source_filename,
-            student_id_override=student_id
-        )
+        # Offload DB persistence and scoring to background if not a dry run
+        if not dry_run:
+            background_tasks.add_task(
+                _finalize_learning_ingest,
+                session_id=session_id,
+                subject_id=session.subject_id,
+                detections=frame_result["detections"],
+                snapshot_bytes=image_bytes,
+                annotated_image_base64=frame_result["annotated_image_base64"],
+                filename=resolved_source_filename,
+                student_id_override=student_id
+            )
 
         return LearningModeResponse(
             session_id=session_id,
@@ -896,6 +899,7 @@ async def ingest_testing_mode(
     image: UploadFile = File(...),
     confidence_threshold: float = Form(0.5),
     source_filename: Optional[str] = Form(None),
+    dry_run: bool = Form(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -938,15 +942,16 @@ async def ingest_testing_mode(
             source_filename=resolved_source_filename,
         )
         
-        # Offload persistence, risk analysis, and incident creation to background
-        background_tasks.add_task(
-            _finalize_testing_ingest,
-            session_id=session_id,
-            room_id=session.room_id,
-            detections=frame_result["detections"],
-            snapshot_bytes=image_bytes,
-            annotated_image_base64=frame_result["annotated_image_base64"]
-        )
+        # Offload persistence, risk analysis, and incident creation to background if not a dry run
+        if not dry_run:
+            background_tasks.add_task(
+                _finalize_testing_ingest,
+                session_id=session_id,
+                room_id=session.room_id,
+                detections=frame_result["detections"],
+                snapshot_bytes=image_bytes,
+                annotated_image_base64=frame_result["annotated_image_base64"]
+            )
 
         return TestingModeResponse(
             session_id=session_id,
@@ -1629,3 +1634,57 @@ async def upload_and_analyze_image(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to process uploaded image: {str(e)}")
 
+class ConfirmDetectionsRequest(BaseModel):
+    mode: str
+    student_id: Optional[UUID] = None
+    detections: List[Dict[str, Any]]
+    annotated_image_base64: str
+    filename: Optional[str] = None
+
+@router.post("/sessions/{session_id}/confirm_detections", status_code=201)
+async def confirm_detections(
+    session_id: UUID,
+    background_tasks: BackgroundTasks,
+    payload: ConfirmDetectionsRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm and save YOLO detections that were originally run with dry_run=True.
+    """
+    session = db.query(ClassSession).filter(ClassSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_session_role(current_user, {"INSTRUCTOR", "ACADEMIC_MANAGER"})
+    _ensure_room_scope(current_user, session.room_id, db)
+
+    try:
+        # Since we don't have the original raw image anymore, we'll use None for snapshot_bytes.
+        # The annotated image will be saved as the ProcessedFrame.
+        if payload.mode.upper() == "LEARNING":
+            background_tasks.add_task(
+                _finalize_learning_ingest,
+                session_id=session_id,
+                subject_id=session.subject_id,
+                detections=payload.detections,
+                snapshot_bytes=None,
+                annotated_image_base64=payload.annotated_image_base64,
+                filename=payload.filename or "confirmed_learning.jpg",
+                student_id_override=payload.student_id
+            )
+        elif payload.mode.upper() == "TESTING":
+            background_tasks.add_task(
+                _finalize_testing_ingest,
+                session_id=session_id,
+                room_id=session.room_id,
+                detections=payload.detections,
+                snapshot_bytes=None,
+                annotated_image_base64=payload.annotated_image_base64
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid mode specified")
+
+        return {"message": "Detections confirmed and queued for persistence"}
+    except Exception as e:
+        logger.exception("[API] Confirm detections failed for session %s", session_id)
+        raise HTTPException(status_code=400, detail=f"Confirm detections failed: {str(e)}")

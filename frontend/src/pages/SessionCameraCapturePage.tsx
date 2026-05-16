@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Play, Square, AlertCircle, RefreshCw, Upload, Camera, Activity } from 'lucide-react'
+import { Play, Square, AlertCircle, RefreshCw, Upload, Camera, CameraOff, Film, Activity, Check, X } from 'lucide-react'
 import { CameraIngestPanel, type CameraIngestPanelHandle } from '../components/CameraIngestPanel'
 import { useCameraInterval } from '../hooks/useCameraInterval'
 import { useFrameUpload } from '../hooks/useFrameUpload'
-import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, ingestLearningMode, ingestTestingMode, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage, getSessionAttendanceReport } from '../services/api'
+import { changeSessionMode, getBehaviorLogs, getRoomHierarchy, getSessions, getTempFrame, getTempOutputFrame, ingestLearningMode, ingestTestingMode, runTempBatchInference, type TempBatchInferenceResponse, uploadAndAnalyzeImage, getSessionAttendanceReport, confirmSessionDetections } from '../services/api'
 import type { BehaviorLogEntry, LearningModeResponse, SessionSummary, TempOutputFrameResponse, TestingModeResponse } from '../types'
 import './SessionCameraCapturePage.css'
 
@@ -24,6 +24,17 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [, setAnnotatedImage] = useState<string | null>(null)
   const [lastDetections, setLastDetections] = useState<any[]>([])
 
+  const [reviewMode, setReviewMode] = useState(false)
+  interface PendingFrame {
+    id: string
+    timestamp: Date
+    mode: 'LEARNING' | 'TESTING'
+    detections: any[]
+    annotated_image_base64: string
+    filename: string
+    student_id?: string
+  }
+  const [pendingApprovals, setPendingApprovals] = useState<PendingFrame[]>([])
   const [captureSource, setCaptureSource] = useState<'LIVE' | 'UPLOAD'>('LIVE')
   const [inferenceMode, setInferenceMode] = useState<'LEARNING' | 'TESTING'>('LEARNING')
   const [tempIndex, setTempIndex] = useState(0)
@@ -33,6 +44,8 @@ export function SessionCameraCapturePage(): JSX.Element {
   const [modeSwitching, setModeSwitching] = useState(false)
   const [modeSwitchError, setModeSwitchError] = useState<string | null>(null)
   const [cameraState, setCameraState] = useState<'IDLE' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'ERROR'>('IDLE')
+  const [cameraSourceType, setCameraSourceType] = useState<'CAMERA' | 'VIDEO_FILE'>('CAMERA')
+  const [cameraVideoFileName, setCameraVideoFileName] = useState<string | null>(null)
   const [diagnosticLogs, setDiagnosticLogs] = useState<{ id: number; level: string; message: string; time: Date }[]>([])
   const logIdRef = useRef(0)
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null)
@@ -114,6 +127,22 @@ export function SessionCameraCapturePage(): JSX.Element {
 
   const handleFrameUploadSuccess = useCallback(
     (response: LearningModeResponse | TestingModeResponse): void => {
+      if (reviewMode) {
+        setPendingApprovals((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 11),
+            timestamp: new Date(),
+            mode: response.mode as 'LEARNING' | 'TESTING',
+            detections: response.detections,
+            annotated_image_base64: response.annotated_image_base64,
+            filename: response.saved_output_path || `frame_${Date.now()}.jpg`,
+            student_id: selectedStudentId || undefined,
+          },
+        ])
+        return
+      }
+
       const newImage = {
         url: response.annotated_image_base64,
         timestamp: new Date(),
@@ -125,7 +154,7 @@ export function SessionCameraCapturePage(): JSX.Element {
       setAnnotatedImage(newImage.url)
       setLastDetections(newImage.detections || [])
     },
-    [],
+    [reviewMode, selectedStudentId],
   )
 
   const handleFrameUploadError = useCallback((errorMessage: string): void => {
@@ -137,6 +166,86 @@ export function SessionCameraCapturePage(): JSX.Element {
     setAnnotatedImage(img.url)
     setLastDetections(img.detections || [])
   }, [])
+
+  const handleConfirmPending = async (frame: PendingFrame) => {
+    try {
+      if (!sessionId) return
+      await confirmSessionDetections(sessionId, {
+        mode: frame.mode,
+        student_id: frame.student_id,
+        detections: frame.detections,
+        annotated_image_base64: frame.annotated_image_base64,
+        filename: frame.filename,
+      })
+      
+      const newImage = {
+        url: frame.annotated_image_base64,
+        timestamp: frame.timestamp,
+        detections: frame.detections,
+      }
+      setGalleryImages((prev) => [newImage, ...prev].slice(0, 12))
+      setFeaturedImage(newImage)
+      setAnnotatedImage(newImage.url)
+      setLastDetections(frame.detections || [])
+      
+      setPendingApprovals(prev => prev.filter(p => p.id !== frame.id))
+      setLogOffset(0) // Refresh behavior logs
+    } catch (err) {
+      console.error('Failed to confirm detections', err)
+      setDiagnosticMessage('Failed to confirm detections.')
+    }
+  }
+
+  const handleRejectPending = (frameId: string) => {
+    setPendingApprovals(prev => prev.filter(p => p.id !== frameId))
+  }
+
+  const handleConfirmAll = async () => {
+    // For simplicity, we just confirm them one by one sequentially
+    // A bulk endpoint would be better, but this works for now
+    if (!sessionId) return
+    
+    // Create a copy to iterate
+    const framesToConfirm = [...pendingApprovals]
+    
+    for (const frame of framesToConfirm) {
+      try {
+        await confirmSessionDetections(sessionId, {
+          mode: frame.mode,
+          student_id: frame.student_id,
+          detections: frame.detections,
+          annotated_image_base64: frame.annotated_image_base64,
+          filename: frame.filename,
+        })
+      } catch (err) {
+        console.error('Failed to confirm frame in batch', frame.id, err)
+        // If one fails, we stop the batch and leave the rest in the queue
+        setDiagnosticMessage('Failed to confirm some detections in batch.')
+        return
+      }
+    }
+    
+    // If all succeeded, clear the queue and add the last one to the featured view
+    if (framesToConfirm.length > 0) {
+      const lastFrame = framesToConfirm[framesToConfirm.length - 1]
+      const newImage = {
+        url: lastFrame.annotated_image_base64,
+        timestamp: lastFrame.timestamp,
+        detections: lastFrame.detections,
+      }
+      setGalleryImages((prev) => [newImage, ...prev].slice(0, 12))
+      setFeaturedImage(newImage)
+      setAnnotatedImage(newImage.url)
+      setLastDetections(lastFrame.detections || [])
+      setLogOffset(0) // Refresh logs
+    }
+    
+    setPendingApprovals([])
+  }
+
+  const handleRejectAll = () => {
+    setPendingApprovals([])
+  }
 
   // Resolved room context for the session (needed for admin users who have no room assignments)
   const [sessionBuildingId, setSessionBuildingId] = useState<string | null>(null)
@@ -200,6 +309,7 @@ export function SessionCameraCapturePage(): JSX.Element {
     selectedStudentId,
     handleFrameUploadSuccess,
     handleFrameUploadError,
+    reviewMode,
   )
 
   // Output gallery state
@@ -722,78 +832,30 @@ export function SessionCameraCapturePage(): JSX.Element {
 
       <section className="capture-grid">
         <article className="panel">
-          <h2>Capture Source</h2>
-
-          <div className="capture-options">
-            <div className="control-block">
-              <span className="control-label">Source</span>
-              <div className="toggle-group">
-                <button
-                  className={`btn btn-sm ${captureSource === 'LIVE' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setCaptureSource('LIVE')}
-                  disabled={frameUpload.isUploading}
-                >
-                  Live Camera
-                </button>
-                <button
-                  className={`btn btn-sm ${captureSource === 'UPLOAD' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setCaptureSource('UPLOAD')}
-                  disabled={frameUpload.isUploading}
-                >
-                  Image Upload
-                </button>
-              </div>
-            </div>
-
-            <div className="control-block">
-              <span className="control-label">Inference</span>
-              <div className="toggle-group">
-                <button
-                  className={`btn btn-sm ${inferenceMode === 'LEARNING' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setInferenceMode('LEARNING')}
-                  disabled={frameUpload.isUploading}
-                >
-                  Learning
-                </button>
-                <button
-                  className={`btn btn-sm ${inferenceMode === 'TESTING' ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setInferenceMode('TESTING')}
-                  disabled={frameUpload.isUploading}
-                >
-                  Testing
-                </button>
-              </div>
-            </div>
-
-            <div className="control-block" style={{ flex: '1 1 100%' }}>
-              <span className="control-label">Target Student</span>
-              <select 
-                className="select-input"
-                style={{ 
-                  width: '100%', 
-                  padding: '8px', 
-                  borderRadius: '6px', 
-                  border: '1px solid #d6dbe1',
-                  backgroundColor: '#fff',
-                  fontSize: '13px'
-                }}
-                value={selectedStudentId || ''} 
-                onChange={(e) => setSelectedStudentId(e.target.value || null)}
-                disabled={frameUpload.isUploading || uploadProcessing}
-              >
-                <option value="">-- All Students (Auto-Detect / Unknown) --</option>
-                {enrolledStudents.map((s) => (
-                  <option key={s.student_id} value={s.student_id}>
-                    {s.student_name} ({s.student_code})
-                  </option>
-                ))}
-              </select>
-              {loadingStudents && <p className="muted" style={{ fontSize: '10px', marginTop: '4px' }}>Loading student list...</p>}
+          <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ margin: 0 }}>Capture Feed</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontWeight: 600, color: '#666' }}>
+              {cameraState === 'RUNNING' ? (
+                cameraSourceType === 'VIDEO_FILE' ? <Film size={16} /> : <Camera size={16} />
+              ) : (
+                <CameraOff size={16} />
+              )}
+              <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                {cameraState === 'RUNNING' && cameraSourceType === 'VIDEO_FILE'
+                  ? `VIDEO: ${cameraVideoFileName || 'file'}`
+                  : cameraState}
+              </span>
             </div>
           </div>
-
           {captureSource === 'LIVE' ? (
-            <CameraIngestPanel ref={cameraRef} onStateChange={setCameraState} />
+            <CameraIngestPanel 
+              ref={cameraRef} 
+              onStateChange={setCameraState} 
+              onSourceChange={(source, fileName) => {
+                setCameraSourceType(source)
+                setCameraVideoFileName(fileName || null)
+              }}
+            />
           ) : (
             <div className="upload-panel">
               <p className="muted" style={{ marginBottom: '12px' }}>
@@ -812,7 +874,7 @@ export function SessionCameraCapturePage(): JSX.Element {
                 className="file-input"
               />
               {selectedFile && (
-                <p style={{ marginTop: '8px', fontSize: '12px', color: '#0066cc' }}>
+                <p style={{ marginTop: '8px', fontSize: '12px', color: '#2e8b4e' }}>
                   Selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
                 </p>
               )}
@@ -874,72 +936,153 @@ export function SessionCameraCapturePage(): JSX.Element {
             )}
           </div>
 
-          <div style={{ marginTop: '16px', fontSize: '12px', lineHeight: '1.6' }}>
-            <p>
+          <div className="capture-options" style={{ marginTop: '20px', display: 'flex', gap: '16px' }}>
+            <div className="control-block" style={{ flex: 1 }}>
+              <span className="control-label">Source</span>
+              <div className="toggle-group" style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  className={`btn btn-sm ${captureSource === 'LIVE' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setCaptureSource('LIVE')}
+                  disabled={frameUpload.isUploading}
+                  style={{ flex: 1 }}
+                >
+                  Live
+                </button>
+                <button
+                  className={`btn btn-sm ${captureSource === 'UPLOAD' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setCaptureSource('UPLOAD')}
+                  disabled={frameUpload.isUploading}
+                  style={{ flex: 1 }}
+                >
+                  Upload
+                </button>
+              </div>
+            </div>
+
+            <div className="control-block" style={{ flex: 1 }}>
+              <span className="control-label">Inference</span>
+              <div className="toggle-group" style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  className={`btn btn-sm ${inferenceMode === 'LEARNING' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setInferenceMode('LEARNING')}
+                  disabled={frameUpload.isUploading}
+                  style={{ flex: 1 }}
+                >
+                  Learning
+                </button>
+                <button
+                  className={`btn btn-sm ${inferenceMode === 'TESTING' ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setInferenceMode('TESTING')}
+                  disabled={frameUpload.isUploading}
+                  style={{ flex: 1 }}
+                >
+                  Testing
+                </button>
+              </div>
+            </div>
+
+            <div className="control-block" style={{ flex: 1 }}>
+              <span className="control-label">Manual Review Mode</span>
+              <div className="toggle-group" style={{ display: 'flex', gap: '4px' }}>
+                <button
+                  className={`btn btn-sm ${reviewMode ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setReviewMode(true)}
+                  disabled={frameUpload.isUploading || uploadProcessing}
+                  style={{ flex: 1 }}
+                >
+                  Enabled
+                </button>
+                <button
+                  className={`btn btn-sm ${!reviewMode ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setReviewMode(false)}
+                  disabled={frameUpload.isUploading || uploadProcessing}
+                  style={{ flex: 1 }}
+                >
+                  Disabled
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="capture-options" style={{ marginTop: '16px' }}>
+            <div className="control-block" style={{ flex: '1 1 100%' }}>
+              <span className="control-label">Target Student</span>
+              <select 
+                className="select-input"
+                style={{ 
+                  width: '100%', 
+                  padding: '8px', 
+                  borderRadius: '6px', 
+                  border: '1px solid #d6dbe1',
+                  backgroundColor: '#fff',
+                  fontSize: '13px'
+                }}
+                value={selectedStudentId || ''} 
+                onChange={(e) => setSelectedStudentId(e.target.value || null)}
+                disabled={frameUpload.isUploading || uploadProcessing}
+              >
+                <option value="">-- All Students (Auto-Detect / Unknown) --</option>
+                {enrolledStudents.map((s) => (
+                  <option key={s.student_id} value={s.student_id}>
+                    {s.student_name} ({s.student_code})
+                  </option>
+                ))}
+              </select>
+              {loadingStudents && <p className="muted" style={{ fontSize: '10px', marginTop: '4px' }}>Loading student list...</p>}
+            </div>
+          </div>
+
+          <div style={{ 
+            marginTop: '20px', 
+            fontSize: '13px', 
+            lineHeight: '1.4',
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px 24px',
+            borderTop: '1px solid #f0f0f0',
+            paddingTop: '16px'
+          }}>
+            <p style={{ margin: 0 }}>
               <strong>Status:</strong>{' '}
-              {batchProcessing ? 'Batch Processing...' : uploadProcessing ? 'Analyzing...' : frameUpload.isUploading ? 'Capturing' : 'Idle'}
+              <span style={{ color: '#2e8b4e' }}>
+                {batchProcessing ? 'Batch Processing...' : uploadProcessing ? 'Analyzing...' : frameUpload.isUploading ? 'Capturing' : 'Idle'}
+              </span>
             </p>
-            <p>
-              <strong>Camera State:</strong> {cameraState}
+            <p style={{ margin: 0 }}>
+              <strong>Camera:</strong> {cameraState}
             </p>
-            <p>
+            <p style={{ margin: 0 }}>
               <strong>Source:</strong> {captureSource}
             </p>
-            <p>
+            <p style={{ margin: 0 }}>
               <strong>Inference:</strong> {inferenceMode}
             </p>
-            <p>
-              <strong>Session Mode:</strong> {session.mode}
+            <p style={{ margin: 0 }}>
+              <strong>Session:</strong> {session.mode}
             </p>
-            <p>
-              <strong>Interval:</strong> {intervalMs}ms ({sourceScope} scope)
+            <p style={{ margin: 0 }}>
+              <strong>Interval:</strong> {intervalMs}ms
+            </p>
+            <p style={{ margin: 0 }}>
+              <strong>Detections:</strong> {lastDetections.length}
+            </p>
+            <p style={{ margin: 0 }}>
+              <strong>Uploaded:</strong> {frameUpload.framesUploaded}
             </p>
             {diagnosticMessage && (
-              <p className="muted">
-                <strong>Diagnostic:</strong> {diagnosticMessage}
+              <p className="muted" style={{ margin: 0, gridColumn: 'span 2' }}>
+                <strong>Diag:</strong> {diagnosticMessage}
               </p>
             )}
             {batchResult && (
-              <>
-                <p>
-                  <strong>Batch Result:</strong> {batchResult.processed}/{batchResult.total_input} frames processed
+              <div style={{ gridColumn: 'span 2', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px', marginTop: '4px', borderTop: '1px dashed #eee', paddingTop: '8px' }}>
+                <p style={{ margin: 0 }}>
+                  <strong>Batch:</strong> {batchResult.processed}/{batchResult.total_input}
                 </p>
-                <p>
-                  <strong>Total Detections:</strong>{' '}
-                  {batchResult.results.reduce((sum, r) => sum + r.detection_count, 0)}
+                <p style={{ margin: 0 }}>
+                  <strong>Total Det:</strong> {batchResult.results.reduce((sum, r) => sum + r.detection_count, 0)}
                 </p>
-                {batchResult.errors > 0 && (
-                  <p style={{ color: '#e53e3e' }}>
-                    <strong>Errors:</strong> {batchResult.errors}
-                  </p>
-                )}
-              </>
-            )}
-            {batchError && (
-              <p style={{ color: '#e53e3e' }}>
-                <strong>Error:</strong> {batchError}
-              </p>
-            )}
-            {captureSource === 'LIVE' && (
-              <>
-                <p>
-                  <strong>Detections:</strong> {lastDetections.length}
-                </p>
-                <p>
-                  <strong>Frames Uploaded:</strong> {frameUpload.framesUploaded}
-                </p>
-                {frameUpload.lastResponse?.saved_output_path && (
-                  <p>
-                    <strong>Saved Output:</strong> {frameUpload.lastResponse.saved_output_path}
-                  </p>
-                )}
-                {frameUpload.lastUploadAt && (
-                  <p>
-                    <strong>Last Upload:</strong>{' '}
-                    {frameUpload.lastUploadAt.toLocaleTimeString()}
-                  </p>
-                )}
-              </>
+              </div>
             )}
           </div>
         </article>
@@ -963,7 +1106,7 @@ export function SessionCameraCapturePage(): JSX.Element {
                   style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} 
                 />
                 <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="count-badge" style={{ backgroundColor: '#4a90e2', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px' }}>
+                  <span className="count-badge" style={{ backgroundColor: '#2e8b4e', color: 'white', padding: '2px 8px', borderRadius: '12px', fontSize: '12px' }}>
                     {featuredImage.detections.length} Detections
                   </span>
                 </div>
@@ -1005,7 +1148,7 @@ export function SessionCameraCapturePage(): JSX.Element {
                       cursor: 'pointer',
                       borderRadius: '4px',
                       overflow: 'hidden',
-                      border: featuredImage?.url === img.url ? '2px solid #4a90e2' : '2px solid transparent',
+                      border: featuredImage?.url === img.url ? '2px solid #2e8b4e' : '2px solid transparent',
                       position: 'relative',
                       transition: 'transform 0.2s'
                     }}
@@ -1089,6 +1232,140 @@ export function SessionCameraCapturePage(): JSX.Element {
               }}
             >
               {outputLoading ? 'Loading...' : 'No output frames yet. Start a Temp Replay to generate labeled images.'}
+            </div>
+          )}
+        </section>
+      )}
+
+      {reviewMode && pendingApprovals.length > 0 && (
+        <section className="panel" style={{ border: '2px solid #eab308' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <h2 style={{ color: '#ca8a04', margin: 0 }}>Pending Approvals ({pendingApprovals.length})</h2>
+              <span style={{ fontSize: '12px', color: '#a1a1aa' }}>Focus Mode</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button 
+                className="header-nav-link" 
+                style={{ color: '#16a34a', backgroundColor: '#dcfce7', padding: '6px 12px', borderRadius: '6px' }}
+                onClick={handleConfirmAll}
+              >
+                <Check size={16} /> Confirm All
+              </button>
+              <button 
+                className="header-nav-link" 
+                style={{ color: '#dc2626', backgroundColor: '#fee2e2', padding: '6px 12px', borderRadius: '6px' }}
+                onClick={handleRejectAll}
+              >
+                <X size={16} /> Reject All
+              </button>
+            </div>
+          </div>
+          
+          {/* Active Review Panel */}
+          {(() => {
+            const activeFrame = pendingApprovals[0];
+            return (
+              <div style={{ display: 'flex', gap: '24px', backgroundColor: '#fafafa', border: '1px solid #e4e4e7', borderRadius: '8px', padding: '16px' }}>
+                {/* Left Side: Large Image */}
+                <div style={{ flex: '1 1 60%', minWidth: 0 }}>
+                  <img src={activeFrame.annotated_image_base64} alt="Active pending frame" style={{ width: '100%', borderRadius: '8px', display: 'block', border: '1px solid #e4e4e7' }} />
+                </div>
+                
+                {/* Right Side: Details & Actions */}
+                <div style={{ flex: '1 1 40%', display: 'flex', flexDirection: 'column' }}>
+                  <h3 style={{ marginTop: 0, marginBottom: '8px', color: '#18181b' }}>Review Required</h3>
+                  <div style={{ fontSize: '13px', color: '#71717a', marginBottom: '16px' }}>
+                    {activeFrame.timestamp.toLocaleTimeString()} • {activeFrame.mode}
+                  </div>
+                  
+                  <div style={{ flex: 1, overflowY: 'auto', marginBottom: '24px' }}>
+                    {activeFrame.detections.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {Object.entries(
+                          activeFrame.detections.reduce((acc: Record<string, number>, det: any) => {
+                            acc[det.behavior_class] = (acc[det.behavior_class] || 0) + 1;
+                            return acc;
+                          }, {})
+                        ).map(([behavior, count]) => (
+                          <span key={behavior} style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            backgroundColor: '#f4f4f5',
+                            color: '#3f3f46',
+                            padding: '6px 12px',
+                            borderRadius: '20px',
+                            fontSize: '13px',
+                            fontWeight: 600,
+                            border: '1px solid #e4e4e7',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                          }}>
+                            {behavior} 
+                            <span style={{ 
+                              marginLeft: '8px', 
+                              backgroundColor: '#e4e4e7', 
+                              color: '#52525b', 
+                              padding: '2px 8px', 
+                              borderRadius: '10px', 
+                              fontSize: '11px',
+                              fontWeight: 700
+                            }}>
+                              {count as number}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: '14px', color: '#a1a1aa', margin: 0 }}>No behaviors detected.</p>
+                    )}
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '12px', marginTop: 'auto' }}>
+                    <button 
+                      style={{ 
+                        flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: '#16a34a', padding: '12px', fontSize: '15px', fontWeight: 'bold',
+                        border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(22, 163, 74, 0.2)'
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#15803d'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#16a34a'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                      onClick={() => handleConfirmPending(activeFrame)}
+                    >
+                      <Check size={20} style={{ marginRight: '8px' }} /> Confirm Frame
+                    </button>
+                    <button 
+                      style={{ 
+                        flex: 1, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: '#dc2626', padding: '12px', fontSize: '15px', fontWeight: 'bold',
+                        border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 6px -1px rgba(220, 38, 38, 0.2)'
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.backgroundColor = '#b91c1c'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.backgroundColor = '#dc2626'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                      onClick={() => handleRejectPending(activeFrame.id)}
+                    >
+                      <X size={20} style={{ marginRight: '8px' }} /> Reject
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Up Next Thumbnails */}
+          {pendingApprovals.length > 1 && (
+            <div style={{ marginTop: '16px' }}>
+              <h4 style={{ fontSize: '13px', color: '#71717a', marginBottom: '8px' }}>Up Next ({pendingApprovals.length - 1})</h4>
+              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px' }}>
+                {pendingApprovals.slice(1).map((frame) => (
+                  <div key={frame.id} style={{ flex: '0 0 100px', opacity: 0.7 }}>
+                    <img 
+                      src={frame.annotated_image_base64} 
+                      alt="Thumbnail" 
+                      style={{ width: '100px', height: '56px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #e4e4e7' }} 
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </section>

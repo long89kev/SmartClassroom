@@ -16,10 +16,11 @@ export interface CameraIngestPanelHandle {
 interface CameraIngestPanelProps {
   onCapture?: (dataUri: string) => void
   onStateChange?: (state: CameraState) => void
+  onSourceChange?: (source: SourceType, fileName?: string | null) => void
 }
 
 export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraIngestPanelProps>(
-  function CameraIngestPanel({ onCapture, onStateChange }: CameraIngestPanelProps, ref): JSX.Element {
+  function CameraIngestPanel({ onCapture, onStateChange, onSourceChange }: CameraIngestPanelProps, ref): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -44,6 +45,8 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
     setError(null)
     readyRef.current = false
     setSourceType('CAMERA')
+    setVideoFileName(null)
+    onSourceChange?.('CAMERA', null)
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -116,6 +119,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
     readyRef.current = false
     setSourceType('VIDEO_FILE')
     setVideoFileName(file.name)
+    onSourceChange?.('VIDEO_FILE', file.name)
 
     const url = URL.createObjectURL(file)
     objectUrlRef.current = url
@@ -305,18 +309,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
 
   return (
     <div className="camera-panel">
-      <div className="camera-header">
-        {state === 'RUNNING' ? (
-          sourceType === 'VIDEO_FILE' ? <Film size={18} /> : <Camera size={18} />
-        ) : (
-          <CameraOff size={18} />
-        )}
-        <span className="camera-status">
-          {state === 'RUNNING' && sourceType === 'VIDEO_FILE'
-            ? `VIDEO: ${videoFileName || 'file'}`
-            : state}
-        </span>
-      </div>
+      {/* Header moved to parent */}
 
       {error && (
         <div className="camera-error">
@@ -364,7 +357,7 @@ export const CameraIngestPanel = forwardRef<CameraIngestPanelHandle, CameraInges
               Start Camera
             </button>
             <button
-              className="btn btn-secondary"
+              className="btn btn-outline"
               onClick={() => fileInputRef.current?.click()}
               style={{ marginLeft: '8px' }}
             >

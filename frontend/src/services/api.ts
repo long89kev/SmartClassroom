@@ -482,6 +482,7 @@ export async function ingestLearningMode(
     student_id?: string
     confidence_threshold?: number
     source_filename?: string
+    dry_run?: boolean
   },
 ): Promise<LearningModeResponse> {
   const formData = new FormData()
@@ -495,6 +496,7 @@ export async function ingestLearningMode(
     formData.append('confidence_threshold', payload.confidence_threshold.toString())
   }
   if (payload.source_filename) formData.append('source_filename', payload.source_filename)
+  if (payload.dry_run !== undefined) formData.append('dry_run', payload.dry_run.toString())
 
   const { data } = await api.post<LearningModeResponse>(`/sessions/${sessionId}/learn`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
@@ -509,6 +511,7 @@ export async function ingestTestingMode(
     students_present?: string[]
     confidence_threshold?: number
     source_filename?: string
+    dry_run?: boolean
   },
 ): Promise<TestingModeResponse> {
   const formData = new FormData()
@@ -520,6 +523,7 @@ export async function ingestTestingMode(
     formData.append('confidence_threshold', payload.confidence_threshold.toString())
   }
   if (payload.source_filename) formData.append('source_filename', payload.source_filename)
+  if (payload.dry_run !== undefined) formData.append('dry_run', payload.dry_run.toString())
   // Note: students_present is currently not handled as a list in the new backend signature 
   // but student_id: None is passed for testing mode.
 
@@ -528,6 +532,21 @@ export async function ingestTestingMode(
   })
   return data
 }
+
+export async function confirmSessionDetections(
+  sessionId: string,
+  payload: {
+    mode: string
+    student_id?: string
+    detections: any[]
+    annotated_image_base64: string
+    filename?: string
+  }
+): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>(`/sessions/${sessionId}/confirm_detections`, payload)
+  return data
+}
+
 
 export async function getBehaviorLogs(
   sessionId: string,
