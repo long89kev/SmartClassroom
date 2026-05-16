@@ -130,9 +130,14 @@ class YOLOInferenceService:
             "model_key": "student_bow_turn_discuss",
             "actor_type": "STUDENT",
             "weight_candidates": [
+                # TensorRT engine (fastest — GPU-specific, built by export script)
+                ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.engine"],
+                ["models", "yolo_weights", "student_bow_turn_discuss", "best.engine"],
+                # ONNX (portable, GPU or CPU via onnxruntime)
                 ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.onnx"],
-                ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.pt"],
                 ["models", "yolo_weights", "student_bow_turn_discuss", "best.onnx"],
+                # PyTorch (fallback)
+                ["backend", "models", "yolo_weights", "student_bow_turn_discuss", "best.pt"],
                 ["models", "yolo_weights", "student_bow_turn_discuss", "best.pt"],
             ],
             "class_names": ["BowHead", "TurnHead", "discuss"],
@@ -146,10 +151,12 @@ class YOLOInferenceService:
             "model_key": "student_hand_read_write",
             "actor_type": "STUDENT",
             "weight_candidates": [
+                ["backend", "models", "yolo_weights", "student_hand_read_write", "best.engine"],
+                ["models", "yolo_weights", "student_hand_read_write", "best.engine"],
                 ["backend", "models", "yolo_weights", "student_hand_read_write", "best.onnx"],
+                ["models", "yolo_weights", "student_hand_read_write", "best.onnx"],
                 ["backend", "models", "yolo_weights", "student_hand_read_write", "best.pt"],
                 ["backend", "models", "yolo_weights", "student_hand_read_write", "exp", "weights", "best.pt"],
-                ["models", "yolo_weights", "student_hand_read_write", "best.onnx"],
                 ["models", "yolo_weights", "student_hand_read_write", "best.pt"],
             ],
             "class_names": ["hand-raising", "read", "write"],
@@ -163,10 +170,12 @@ class YOLOInferenceService:
             "model_key": "teacher_behavior",
             "actor_type": "TEACHER",
             "weight_candidates": [
+                ["backend", "models", "yolo_weights", "teacher_behavior", "best.engine"],
+                ["models", "yolo_weights", "teacher_behavior", "best.engine"],
                 ["backend", "models", "yolo_weights", "teacher_behavior", "best.onnx"],
+                ["models", "yolo_weights", "teacher_behavior", "best.onnx"],
                 ["backend", "models", "yolo_weights", "teacher_behavior", "best.pt"],
                 ["backend", "models", "yolo_weights", "teacher_behavior", "exp", "weights", "best.pt"],
-                ["models", "yolo_weights", "teacher_behavior", "best.onnx"],
                 ["models", "yolo_weights", "teacher_behavior", "best.pt"],
             ],
             "class_names": ["guide", "answer", "On-stage interaction", "teacher"],
@@ -256,6 +265,10 @@ class YOLOInferenceService:
             if candidate.exists() and candidate.is_file():
                 return candidate
             if candidate.exists() and candidate.is_dir():
+                # Priority: TensorRT engine > ONNX > PyTorch
+                best_engine = candidate / "best.engine"
+                if best_engine.exists():
+                    return best_engine
                 best_onnx = candidate / "best.onnx"
                 if best_onnx.exists():
                     return best_onnx
