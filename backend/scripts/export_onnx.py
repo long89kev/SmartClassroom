@@ -30,11 +30,19 @@ import sys
 from pathlib import Path
 import logging
 
-# Ensure backend directory is in PYTHONPATH so we can import from app
-repo_root = Path(__file__).resolve().parents[2]
-backend_dir = repo_root / "backend"
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
+# Ensure backend directory is in PYTHONPATH so we can import from app.
+# Works in both layouts:
+#   Local dev:  d:/Projects/DoAnDN/backend/scripts/export_onnx.py
+#               → parents[2] = d:/Projects/DoAnDN → backend_dir = .../DoAnDN/backend
+#   Docker:     /app/scripts/export_onnx.py
+#               → parents[1] = /app (WORKDIR, where app/ lives)
+script_dir = Path(__file__).resolve().parent          # .../scripts
+backend_dir = script_dir.parent                       # .../backend  (or /app in Docker)
+repo_root = backend_dir.parent                        # .../DoAnDN   (or /     in Docker)
+
+for p in [str(backend_dir), str(repo_root / "backend")]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 from ultralytics import YOLO
 from app.services.yolo_inference import YOLOInferenceService
