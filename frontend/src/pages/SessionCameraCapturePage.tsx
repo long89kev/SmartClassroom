@@ -774,7 +774,7 @@ export function SessionCameraCapturePage(): JSX.Element {
     )
   }
 
-  const logsPerPage = 20
+  const logsPerPage = 10
 
   return (
     <main className="capture-page campus-bg">
@@ -1435,7 +1435,7 @@ export function SessionCameraCapturePage(): JSX.Element {
                   </tr>
                 </thead>
                 <tbody>
-                  {behaviorLogs.map((log) => (
+                  {behaviorLogs.slice(0, logsPerPage).map((log) => (
                     <tr key={log.id}>
                       <td>{log.actor_id ? log.actor_id.slice(0, 8) : 'Unknown'}</td>
                       <td>{log.behavior_class}</td>
