@@ -5,7 +5,6 @@
 #   - onnxruntime       → onnxruntime-gpu  (requires CUDA 12.x + cuDNN 9.x)
 #   - torch+cpu         → torch+cu124       (CUDA 12.4 wheels)
 #   - torchvision+cpu   → torchvision+cu124
-#   + tensorrt           (for .engine export & inference)
 #
 # Tested with: RTX 3060, Driver 566.36, CUDA toolkit ≤12.6
 # ──────────────────────────────────────────────────────────────
@@ -46,10 +45,6 @@ onnx>=1.15.0
 # Pin to 1.20.x for best stability with CUDA 12.4 base image.
 # Versions <1.19 ship CUDA 11 / cuDNN 8 which would conflict.
 onnxruntime-gpu==1.20.1
-
-# TensorRT for .engine export and accelerated inference.
-# Ultralytics uses this automatically when loading .engine files.
-tensorrt>=10.0,<11
 
 # PyTorch CUDA 12.4 wheels — compatible with driver ≥525 (your 566.36 is fine).
 # Pin to 2.5.1+cu124: well-tested stable release for CUDA 12.4.
