@@ -436,6 +436,7 @@ class YOLOInferenceService:
             verbose=False,
             classes=allowed_ids,
             device=self._device,
+            half=(self._device != "cpu"),  # Enable FP16 for faster GPU inference
         )
         
         class_names = model_entry["class_names"]
