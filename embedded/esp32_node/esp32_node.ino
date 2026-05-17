@@ -87,11 +87,11 @@ void setup() {
   lcd.print("Starting...");
   Serial.println("[LCD] 16x2 LCD initialized");
 
-  // Initialize Relay pins (Active LOW)
+  // Initialize Relay pins (Active HIGH)
   int relayPins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
   for (int i = 0; i < 4; i++) {
     pinMode(relayPins[i], OUTPUT);
-    digitalWrite(relayPins[i], HIGH); // HIGH = OFF for active-low relay
+    digitalWrite(relayPins[i], LOW); // LOW = OFF for active-high relay
   }
   Serial.println("[RELAY] 4-channel relay initialized (all OFF)");
 
@@ -360,12 +360,11 @@ void setRelay(int channel, bool state) {
   int pins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
   int pin = pins[channel - 1];
 
-  // Active LOW relay: LOW = ON, HIGH = OFF
-  digitalWrite(pin, state ? LOW : HIGH);
+  // Active HIGH relay: HIGH = ON, LOW = OFF
+  digitalWrite(pin, state ? HIGH : LOW);
   relayStates[channel - 1] = state;
 
-  const char *deviceNames[] = {"LED Zone 1", "LED Zone 2", "LED Zone 3",
-                               "DC Fan 1"};
+  const char *deviceNames[] = {"AC 1", "FAN 1", "LIGHT 1", "LIGHT 2"};
   Serial.print("[RELAY] ");
   Serial.print(deviceNames[channel - 1]);
   Serial.print(" (CH");
@@ -408,7 +407,7 @@ void handleModeChange(String newMode) {
   Serial.print("[MODE] Changed to: ");
   Serial.println(currentMode);
 
-  // Update LCD line 1 with mode
+  // Update LCD line 1 with mode by default
   lcdLine1 = "Mode: " + currentMode;
 
   // Mode-specific actions
@@ -420,7 +419,8 @@ void handleModeChange(String newMode) {
     lcdLine2 = "Learning Active";
   } else {
     // IDLE
-    lcdLine2 = "Standby";
+    lcdLine1 = "IDLE";
+    lcdLine2 = "auto";
   }
 }
 

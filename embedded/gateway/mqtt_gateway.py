@@ -337,12 +337,8 @@ def forward_to_testing_inference(session_id: str, frame_bytes: bytes):
         resp = requests.post(url, files=files, params=params, timeout=30)
         if resp.status_code == 200:
             result = resp.json()
-            risk_analysis = result.get("risk_analysis", {})
-            high_risk = [s for s in risk_analysis.get("student_risks", [])
-                        if s.get("risk_level") in ("HIGH", "CRITICAL")]
-
-            if high_risk:
-                logger.warning(f"🚨 {len(high_risk)} high-risk students detected!")
+            if result.get("detection_count", 0) > 0:
+                logger.warning(f"🚨 {result.get('detection_count')} suspicious behaviors detected!")
                 controller.trigger_cheat_alert()
 
             logger.info(f"Testing inference complete: {len(risk_analysis.get('student_risks', []))} students analyzed")
@@ -432,32 +428,30 @@ def device_state_poll_loop():
                     desired_status = ds.get("status", "OFF").upper()
                     on = desired_status == "ON"
 
-                    # Find all relay channels for this device type
-                    channels = [
-                        ch for ch, dtype in room_config.relay_device_type.items()
-                        if dtype == device_type
-                    ]
+                    # Find the specific relay channel for this device ID
+                    channel = room_config.device_relay_map.get(device_id)
 
-                    if channels:
+                    if channel is not None:
                         logger.info(
                             f"Manual override: {device_id} ({device_type}) → {desired_status} "
-                            f"(channels: {channels})"
+                            f"(channel: {channel})"
                         )
-                        for ch in channels:
-                            state_str = "ON" if on else "OFF"
-                            mqtt_client.publish(Topics.relay(ch), state_str)
-                            controller.state.relay_states[ch] = on
-                            logger.info(f"  Relay CH{ch} → {state_str}")
+                        state_str = "ON" if on else "OFF"
+                        mqtt_client.publish(Topics.relay(channel), state_str)
+                        controller.state.relay_states[channel] = on
+                        logger.info(f"  Relay CH{channel} → {state_str}")
 
                         # Update controller tracking flags
-                        if device_type == "FAN":
+                        if device_type == "AC":
+                            controller._ac_was_on = on
+                        elif device_type == "FAN":
                             controller._fan_was_on = on
                         elif device_type == "LIGHT":
                             controller._lights_were_on = on
                     else:
                         logger.warning(
                             f"Manual override: {device_id} ({device_type}) — "
-                            f"no relay channel mapped for this device type"
+                            f"no relay channel mapped for this device ID"
                         )
 
                     # Clear the override so we don't re-apply it

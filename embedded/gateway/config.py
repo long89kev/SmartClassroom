@@ -34,23 +34,27 @@ class BackendConfig:
 class RoomConfig:
     """Room-to-device mapping for the classroom."""
     room_id: str = os.getenv("ROOM_ID", "")  # UUID from database
-    room_code: str = os.getenv("ROOM_CODE", "B1-F1-R03")
+    room_code: str = os.getenv("ROOM_CODE", "A1-104")
 
-    # Device ID → Relay channel mapping
-    device_relay_map: Dict[str, int] = field(default_factory=lambda: {
-        "light_zone1": 1,    # Relay CH1 → LED Zone 1 (LIGHT)
-        "ac_1": 2,           # Relay CH2 → AC (simulated on LED Zone 2)
-        "camera_1": 3,       # Relay CH3 → CAMERA (simulated on LED Zone 3)
-        "fan_1": 4,          # Relay CH4 → DC Fan 1 (FAN)
-    })
+    @property
+    def device_relay_map(self) -> Dict[str, int]:
+        """Device ID → Relay channel mapping (dynamic based on room_code)."""
+        return {
+            f"{self.room_code}-AC-01": 1,      # Relay CH1 → AC 1
+            f"{self.room_code}-FAN-01": 2,     # Relay CH2 → FAN 1
+            f"{self.room_code}-LIGHT-01": 3,   # Relay CH3 → LIGHT 1
+            f"{self.room_code}-LIGHT-02": 4,   # Relay CH4 → LIGHT 2
+        }
 
-    # Device types for each relay channel
-    relay_device_type: Dict[int, str] = field(default_factory=lambda: {
-        1: "LIGHT",
-        2: "AC",
-        3: "CAMERA",
-        4: "FAN",
-    })
+    @property
+    def relay_device_type(self) -> Dict[int, str]:
+        """Device types for each relay channel."""
+        return {
+            1: "AC",
+            2: "FAN",
+            3: "LIGHT",
+            4: "LIGHT",
+        }
 
 
 # ─── MQTT Topic Schema ──────────────────────────────────
@@ -66,7 +70,7 @@ class Topics:
 
     # Actuator topics (Gateway → ESP32)
     RELAY_PREFIX = "classroom/actuators/relay/"
-    BUZZER = "classroom/actuators/buzzer"
+    ALERT_LED = "classroom/actuators/alert_led"
 
     # Display topics (Gateway → ESP32)
     LCD_LINE1 = "classroom/display/line1"

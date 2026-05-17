@@ -93,6 +93,9 @@ def publish_sensors(client):
     humidity = HUMIDITY_BASE + random.uniform(-HUMIDITY_VARIANCE, HUMIDITY_VARIANCE)
     humidity = round(max(30, min(95, humidity)), 1)
 
+    # Light level (lux) — simulate classroom lighting
+    light = round(random.uniform(200, 800), 1)
+
     # Publish temperature
     temp_data = json.dumps({"value": temp, "unit": "C", "ts": int(time.time() * 1000)})
     client.publish("classroom/sensors/temperature", temp_data)
@@ -101,7 +104,11 @@ def publish_sensors(client):
     hum_data = json.dumps({"value": humidity, "unit": "%", "ts": int(time.time() * 1000)})
     client.publish("classroom/sensors/humidity", hum_data)
 
-    logger.info(f"  📡 Sensors: {temp}°C, {humidity}%")
+    # Publish light level
+    light_data = json.dumps({"value": light, "unit": "%", "ts": int(time.time() * 1000)})
+    client.publish("classroom/sensors/light", light_data)
+
+    logger.info(f"  📡 Sensors: {temp}°C, {humidity}%, {light} lux")
 
     return temp, humidity
 
