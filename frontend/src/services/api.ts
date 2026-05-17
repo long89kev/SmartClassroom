@@ -639,3 +639,21 @@ export async function uploadAndAnalyzeImage(
     throw new Error(normalizeApiError(error))
   }
 }
+
+export async function fetchRoomAutoMode(roomId: string): Promise<{ is_auto: boolean }> {
+  try {
+    const { data } = await api.get<{ is_auto: boolean }>(`/rooms/${roomId}/auto-mode`)
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
+}
+
+export async function toggleRoomAutoMode(roomId: string, isAuto: boolean): Promise<{ message: string, is_auto: boolean }> {
+  try {
+    const { data } = await api.post<{ message: string, is_auto: boolean }>(`/rooms/${roomId}/auto-mode`, { is_auto: isAuto })
+    return data
+  } catch (error) {
+    throw new Error(normalizeApiError(error))
+  }
+}

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Room, RoomOccupancy, RoomSensorReading
+from app.models import Room, RoomOccupancy, RoomSensorReading, DeviceState
 
 router = APIRouter(prefix="/api", tags=["Sensors"])
 
@@ -132,4 +132,36 @@ async def get_room_by_code(room_code: str, db: Session = Depends(get_db)):
         "room_code": room.room_code,
         "name": room.name,
         "capacity": room.capacity,
+    }
+
+
+@router.post("/devices/{device_id}/clear-override-internal")
+async def clear_device_override_internal(
+    device_id: str,
+    room_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Internal endpoint used by the MQTT gateway to clear the manual_override flag
+    after a toggle command has been applied to the hardware relays.
+    No auth required as this is only called by the internal gateway service.
+    """
+    device_state = db.query(DeviceState).filter(
+        DeviceState.room_id == room_id,
+        DeviceState.device_id == device_id
+    ).first()
+    
+    if not device_state:
+        raise HTTPException(status_code=404, detail="Device not found")
+    
+    device_state.manual_override = False
+    device_state.override_until = None
+    device_state.last_updated = datetime.utcnow()
+    
+    db.commit()
+    
+    return {
+        "message": "Manual override cleared",
+        "device_id": device_id,
+        "manual_override": False
     }

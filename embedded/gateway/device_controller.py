@@ -7,6 +7,9 @@ Implements the control logic from PDF Section 7:
   - HVAC: temp > 28°C → fans ON, < 26°C → fans OFF
   - Buzzer: cheat alert in testing mode
   - LCD: mode + sensor display
+
+Thresholds are fetched dynamically from the backend API so that
+changes made through the frontend Dashboard take effect in real time.
 """
 
 import logging
@@ -14,9 +17,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Callable
 
-from config import thresholds, room_config, Topics
+from config import thresholds as default_thresholds, room_config, Topics
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DynamicThreshold:
+    """Threshold values for a single device type, fetched from the backend."""
+    device_type: str = ""
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    target_value: Optional[float] = None
+    enabled: bool = True
 
 
 @dataclass
@@ -34,6 +47,9 @@ class RoomState:
     relay_states: Dict[int, bool] = field(default_factory=lambda: {
         1: False, 2: False, 3: False, 4: False
     })
+    
+    # Control Mode
+    is_auto: bool = True
 
     # Timing
     last_occupied_time: float = 0.0
@@ -63,6 +79,87 @@ class DeviceController:
         self._fan_was_on = False
         self._lights_were_on = False
 
+        # Dynamic thresholds keyed by device_type (e.g. "AC", "FAN", "LIGHT")
+        # Initialised from the static defaults so control works before the
+        # first backend fetch completes.
+        self._thresholds: Dict[str, DynamicThreshold] = {
+            "AC": DynamicThreshold(
+                device_type="AC",
+                min_value=default_thresholds.temp_low,
+                max_value=default_thresholds.temp_high,
+                target_value=(default_thresholds.temp_low + default_thresholds.temp_high) / 2,
+                enabled=True,
+            ),
+            "FAN": DynamicThreshold(
+                device_type="FAN",
+                min_value=default_thresholds.temp_moderate_low,
+                max_value=default_thresholds.temp_moderate_high,
+                target_value=(default_thresholds.temp_moderate_low + default_thresholds.temp_moderate_high) / 2,
+                enabled=True,
+            ),
+            "LIGHT": DynamicThreshold(
+                device_type="LIGHT",
+                min_value=None,
+                max_value=None,
+                target_value=None,
+                enabled=True,
+            ),
+        }
+
+    # ─── Dynamic Threshold Management ────────────────────
+
+    def get_threshold(self, device_type: str) -> Optional[DynamicThreshold]:
+        """Return the current dynamic threshold for a device type."""
+        return self._thresholds.get(device_type.upper())
+
+    def update_thresholds(self, backend_thresholds: list[dict]):
+        """
+        Replace the in-memory thresholds with values fetched from the backend.
+        Each item: {device_type_code, min_value, max_value, target_value, enabled}
+
+        After updating, immediately re-evaluate all device states so that
+        relay changes take effect without waiting for the next sensor reading.
+        """
+        changed = False
+        for item in backend_thresholds:
+            key = item.get("device_type_code", "").upper()
+            if not key:
+                continue
+
+            new_th = DynamicThreshold(
+                device_type=key,
+                min_value=item.get("min_value"),
+                max_value=item.get("max_value"),
+                target_value=item.get("target_value"),
+                enabled=bool(item.get("enabled", True)),
+            )
+
+            old_th = self._thresholds.get(key)
+            if old_th is None or (
+                old_th.min_value != new_th.min_value
+                or old_th.max_value != new_th.max_value
+                or old_th.target_value != new_th.target_value
+                or old_th.enabled != new_th.enabled
+            ):
+                self._thresholds[key] = new_th
+                if old_th is not None:
+                    logger.info(
+                        f"Threshold updated: {key} → "
+                        f"min={new_th.min_value}, target={new_th.target_value}, "
+                        f"max={new_th.max_value}, enabled={new_th.enabled}"
+                    )
+                changed = True
+
+        if changed:
+            logger.info("Re-evaluating all device states after threshold change")
+            self._evaluate_all()
+
+    def _evaluate_all(self):
+        """Re-evaluate every control rule. Called after threshold changes."""
+        self._evaluate_hvac()
+        self._evaluate_light_level()
+        self._evaluate_lighting()
+
     # ─── Sensor Update Handlers ──────────────────────────
 
     def on_temperature(self, value: float):
@@ -81,6 +178,7 @@ class DeviceController:
         """Handle light reading."""
         self.state.light = value
         logger.debug(f"Light updated: {value}%")
+        self._evaluate_light_level()
 
     def on_occupancy(self, count: int, detected: bool):
         """Handle occupancy detection update."""
@@ -142,7 +240,7 @@ class DeviceController:
             logger.warning("Cheat alert ignored — not in TESTING mode")
             return
 
-        if not thresholds.cheat_alert_enabled:
+        if not default_thresholds.cheat_alert_enabled:
             return
 
         logger.warning(f"🚨 CHEAT ALERT! Student: {student_id or 'unknown'}")
@@ -153,13 +251,35 @@ class DeviceController:
 
     # ─── Control Logic: Lighting (Section 7.1) ──────────
 
+    def _has_light_sensor_thresholds(self) -> bool:
+        """Return True when a LIGHT threshold with min/max is configured,
+        meaning the light-sensor control should take priority."""
+        light_th = self.get_threshold("LIGHT")
+        if not light_th or not light_th.enabled:
+            return False
+        return light_th.min_value is not None or light_th.max_value is not None
+
     def _evaluate_lighting(self):
         """
-        Lighting Control Logic:
-        - Lights ON only during active session
-        - Zone-based (all zones on when occupied)
-        - OFF after 10 minutes with no occupancy
+        Occupancy-based Lighting Control (Section 7.1).
+        Turns off lights if room is empty for > timeout.
         """
+        if not self.state.is_auto:
+            return
+
+        light_th = self.get_threshold("LIGHT")
+        if light_th and not light_th.enabled:
+            # Threshold disabled → turn lights off
+            if self._lights_were_on:
+                logger.info("Lights OFF — LIGHT threshold disabled")
+                self._set_all_lights(False)
+            return
+
+        # If sensor-based thresholds are active, let _evaluate_light_level
+        # handle all lighting decisions to avoid the two systems conflicting.
+        if self._has_light_sensor_thresholds():
+            return
+
         if not self.state.session_active:
             # No session — check idle timeout
             if self.state.is_occupied:
@@ -169,7 +289,7 @@ class DeviceController:
                 idle_seconds = time.time() - self.state.last_occupied_time
                 idle_minutes = idle_seconds / 60.0
 
-                if idle_minutes >= thresholds.idle_lights_off_minutes:
+                if idle_minutes >= default_thresholds.idle_lights_off_minutes:
                     if self._lights_were_on:
                         logger.info(f"Lights OFF — idle for {idle_minutes:.0f} min")
                         self._set_all_lights(False)
@@ -181,7 +301,38 @@ class DeviceController:
         else:
             # Session active but no one detected — wait for idle timeout
             idle_seconds = time.time() - self.state.last_occupied_time
-            if idle_seconds / 60.0 >= thresholds.idle_lights_off_minutes:
+            if idle_seconds / 60.0 >= default_thresholds.idle_lights_off_minutes:
+                self._set_all_lights(False)
+
+    def _evaluate_light_level(self):
+        """
+        Light-sensor threshold control.
+        If a LIGHT threshold with min/max is configured from the dashboard,
+        turn lights ON when ambient light drops below min (too dark),
+        and OFF when it rises above max (bright enough).
+        """
+        light_th = self.get_threshold("LIGHT")
+        if not light_th or not light_th.enabled:
+            return
+        if light_th.min_value is None and light_th.max_value is None:
+            return
+
+        reading = self.state.light  # 0–100 %
+
+        if light_th.min_value is not None and reading < light_th.min_value:
+            # Ambient light is too low → turn lights ON
+            if not self._lights_were_on:
+                logger.info(
+                    f"Lights ON — ambient light {reading}% < min threshold {light_th.min_value}%"
+                )
+                self._set_all_lights(True)
+
+        elif light_th.max_value is not None and reading > light_th.max_value:
+            # Ambient light is high enough → turn lights OFF
+            if self._lights_were_on:
+                logger.info(
+                    f"Lights OFF — ambient light {reading}% > max threshold {light_th.max_value}%"
+                )
                 self._set_all_lights(False)
 
     def _set_all_lights(self, on: bool):
@@ -199,37 +350,50 @@ class DeviceController:
 
     def _evaluate_hvac(self):
         """
-        HVAC Control Logic:
-        - temp > 28°C + occupied → fans ON
-        - temp < 26°C → fans OFF
-        - 25-27°C → fans only for air circulation
+        HVAC Control Logic using **dynamic thresholds** from the dashboard.
+
+        The AC threshold drives fan behaviour:
+          - reading > max  → fans ON  (too hot)
+          - reading < min  → fans OFF (cool enough)
+          - min < reading < max → maintain current state (hysteresis)
+
+        Falls back to the static defaults when no AC threshold exists.
         """
-        if not self.state.is_occupied:
-            # No occupancy — turn off HVAC
+        if not self.state.is_auto:
+            return
+
+        ac_th = self.get_threshold("AC")
+
+        # If threshold is explicitly disabled, turn fans off
+        if ac_th and not ac_th.enabled:
             if self._fan_was_on:
-                logger.info("Fans OFF — room unoccupied")
+                logger.info("Fans OFF — AC threshold disabled")
                 self._set_all_fans(False)
             return
 
         temp = self.state.temperature
 
-        if temp > thresholds.temp_high:
+        # Resolve effective min / max
+        if ac_th and ac_th.max_value is not None and ac_th.min_value is not None:
+            eff_max = ac_th.max_value
+            eff_min = ac_th.min_value
+        else:
+            eff_max = default_thresholds.temp_high
+            eff_min = default_thresholds.temp_low
+
+        if temp > eff_max:
             # Hot — fans ON
             if not self._fan_was_on:
-                logger.info(f"Fans ON — temperature {temp}°C > {thresholds.temp_high}°C")
+                logger.info(f"Fans ON — temperature {temp}°C > max threshold {eff_max}°C")
                 self._set_all_fans(True)
 
-        elif temp < thresholds.temp_low:
+        elif temp < eff_min:
             # Cool enough — fans OFF
             if self._fan_was_on:
-                logger.info(f"Fans OFF — temperature {temp}°C < {thresholds.temp_low}°C")
+                logger.info(f"Fans OFF — temperature {temp}°C < min threshold {eff_min}°C")
                 self._set_all_fans(False)
 
-        elif thresholds.temp_moderate_low <= temp <= thresholds.temp_moderate_high:
-            # Moderate — fans on for air circulation
-            if not self._fan_was_on:
-                logger.info(f"Fans ON (moderate) — temperature {temp}°C")
-                self._set_all_fans(True)
+        # Between min and max → keep current state (hysteresis)
 
     def _set_all_fans(self, on: bool):
         """Control all fan relay channels."""
@@ -316,6 +480,15 @@ class DeviceController:
 
     # ─── Periodic Check (called from gateway loop) ───────
 
+    def set_auto_mode(self, is_auto: bool):
+        """Toggle hardcoded auto/manual mode from MQTT."""
+        if self.state.is_auto != is_auto:
+            self.state.is_auto = is_auto
+            logger.info(f"Control Mode changed to: {'AUTO' if is_auto else 'MANUAL'}")
+            if is_auto:
+                logger.info("Re-evaluating rules on entering AUTO mode.")
+                self._evaluate_all()
+
     def periodic_check(self):
         """
         Run periodic control evaluations.
@@ -324,6 +497,9 @@ class DeviceController:
         # Re-evaluate lighting idle timeout
         if not self.state.is_occupied and self._lights_were_on:
             self._evaluate_lighting()
+
+        # Re-evaluate light-level threshold in case reading is stale
+        self._evaluate_light_level()
 
         # Check ESP32 health (offline if no heartbeat for 2 minutes)
         now = time.time()

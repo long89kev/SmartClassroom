@@ -9,11 +9,11 @@
 #define CONFIG_H
 
 // ─── WiFi Configuration ─────────────────────────────────
-#define WIFI_SSID "Hoang Tam Long"
-#define WIFI_PASSWORD "33110035"
+#define WIFI_SSID "overthinkers tret"
+#define WIFI_PASSWORD "stopthinking"
 
 // ─── MQTT Broker (Mosquitto in Docker) ──────────────────
-#define MQTT_BROKER_IP "192.168.1.104" // IP of the machine running Docker
+#define MQTT_BROKER_IP "192.168.0.177" // IP of the machine running Docker
 #define MQTT_BROKER_PORT 1883
 #define MQTT_CLIENT_ID "esp32_sensor_node"
 #define MQTT_USERNAME "" // Leave empty if anonymous
@@ -67,8 +67,8 @@
 #define LCD_UPDATE_INTERVAL_MS 2000  // LCD refresh every 2 seconds
 
 // ─── Device Control Thresholds ──────────────────────────
-#define TEMP_HIGH_THRESHOLD 28.0     // °C — activate fans
-#define TEMP_LOW_THRESHOLD 26.0      // °C — deactivate fans
+#define TEMP_HIGH_THRESHOLD 28.0  // °C — activate fans
+#define TEMP_LOW_THRESHOLD 26.0   // °C — deactivate fans
 #define ALERT_LED_DURATION_MS 500 // Alert LED flash duration
 #define ALERT_LED_REPEAT 3        // Number of flashes
 

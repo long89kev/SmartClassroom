@@ -19,6 +19,8 @@ import {
   updateGlobalThreshold,
   updateRoomThreshold,
   updateRoomDevice,
+  fetchRoomAutoMode,
+  toggleRoomAutoMode,
 } from '../services/api'
 import type {
   AttendanceSessionReport,
@@ -134,6 +136,7 @@ export function BuildingSessionsPage(): JSX.Element {
   const [thresholdDraft, setThresholdDraft] = useState<Record<string, { min: string; max: string; target: string; enabled: boolean }>>({})
   const [thresholdMessage, setThresholdMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [attendanceReport, setAttendanceReport] = useState<AttendanceSessionReport | null>(null)
+  const [isRoomAuto, setIsRoomAuto] = useState<boolean>(true)
 
   const [selectedBuildingId, setSelectedBuildingId] = useState<string>(buildingId ?? 'ALL')
   const [selectedFloorId, setSelectedFloorId] = useState<string>('ALL')
@@ -558,12 +561,13 @@ export function BuildingSessionsPage(): JSX.Element {
       setIsThresholdPanelLoading(true)
 
       try {
-        const [inventoryResult, stateResult, sensorResult, globalThresholdResult, thresholdResult] = await Promise.allSettled([
+        const [inventoryResult, stateResult, sensorResult, globalThresholdResult, thresholdResult, autoModeResult] = await Promise.allSettled([
           getRoomDevices(selectedRoomId),
           getRoomDeviceStates(selectedRoomId),
           getRoomSensorReadings(selectedRoomId),
           getGlobalThresholds(),
           getRoomThresholds(selectedRoomId),
+          fetchRoomAutoMode(selectedRoomId),
         ])
 
         if (inventoryResult.status !== 'fulfilled' || stateResult.status !== 'fulfilled') {
@@ -602,6 +606,7 @@ export function BuildingSessionsPage(): JSX.Element {
         setRoomSensorReadings(sensorResult.status === 'fulfilled' ? sensorResult.value.readings : [])
         setGlobalThresholds(globalThresholdResult.status === 'fulfilled' ? globalThresholdResult.value : [])
         setRoomThresholds(thresholdResult.status === 'fulfilled' ? thresholdResult.value : [])
+        setIsRoomAuto(autoModeResult.status === 'fulfilled' ? autoModeResult.value.is_auto : true)
       } catch (loadError) {
         if (!isMounted) return
         setError(loadError instanceof Error ? loadError.message : 'Failed to load room devices')
@@ -691,6 +696,17 @@ export function BuildingSessionsPage(): JSX.Element {
       })
     } finally {
       setIsSavingConfig(false)
+    }
+  }
+
+  async function handleToggleAutoMode(): Promise<void> {
+    if (!canToggleDevices || selectedRoomId === 'ALL') return
+    try {
+      const newMode = !isRoomAuto
+      await toggleRoomAutoMode(selectedRoomId, newMode)
+      setIsRoomAuto(newMode)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to toggle mode')
     }
   }
 
@@ -1157,9 +1173,22 @@ export function BuildingSessionsPage(): JSX.Element {
 
           {showCrudPanel ? (
             <section className="panel device-subpanel">
-              <div className="section-title-row">
-                <h3>CRUD Activities Panel</h3>
-                <span>Target room: {selectedRoomMeta.room.room_code}</span>
+              <div className="section-title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3>Device Status</h3>
+                  <span>Manage hardware status overrides.</span>
+                </div>
+                {selectedRoomId !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleAutoMode()}
+                    disabled={!canToggleDevices}
+                    className={`device-status-toggle ${isRoomAuto ? 'on' : 'off'}`}
+                    style={{ minWidth: '140px' }}
+                  >
+                    Mode: {isRoomAuto ? 'AUTO' : 'MANUAL'}
+                  </button>
+                )}
               </div>
 
               {createDeviceMessage ? (

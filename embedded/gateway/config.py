@@ -38,17 +38,17 @@ class RoomConfig:
 
     # Device ID → Relay channel mapping
     device_relay_map: Dict[str, int] = field(default_factory=lambda: {
-        "light_zone1": 1,    # Relay CH1 → LED Zone 1
-        "light_zone2": 2,    # Relay CH2 → LED Zone 2
-        "light_zone3": 3,    # Relay CH3 → LED Zone 3
-        "fan_1": 4,          # Relay CH4 → DC Fan 1
+        "light_zone1": 1,    # Relay CH1 → LED Zone 1 (LIGHT)
+        "ac_1": 2,           # Relay CH2 → AC (simulated on LED Zone 2)
+        "camera_1": 3,       # Relay CH3 → CAMERA (simulated on LED Zone 3)
+        "fan_1": 4,          # Relay CH4 → DC Fan 1 (FAN)
     })
 
     # Device types for each relay channel
     relay_device_type: Dict[int, str] = field(default_factory=lambda: {
         1: "LIGHT",
-        2: "LIGHT",
-        3: "LIGHT",
+        2: "AC",
+        3: "CAMERA",
         4: "FAN",
     })
 
