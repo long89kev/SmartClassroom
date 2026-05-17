@@ -247,7 +247,7 @@ class DeviceController:
             return
 
         logger.warning(f"🚨 CHEAT ALERT! Student: {student_id or 'unknown'}")
-        self.publish(Topics.BUZZER, "ALERT")
+        self.publish(Topics.ALERT_LED, "ALERT")
 
         # Update LCD
         self.publish(Topics.LCD_LINE2, "!ALERT DETECTED!")

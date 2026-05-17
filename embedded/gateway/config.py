@@ -70,7 +70,7 @@ class Topics:
 
     # Actuator topics (Gateway → ESP32)
     RELAY_PREFIX = "classroom/actuators/relay/"
-    BUZZER = "classroom/actuators/buzzer"
+    ALERT_LED = "classroom/actuators/alert_led"
 
     # Display topics (Gateway → ESP32)
     LCD_LINE1 = "classroom/display/line1"

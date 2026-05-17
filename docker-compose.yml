@@ -74,6 +74,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: long89kev/smartclassroom-backend:latest
     container_name: doai_backend
     mem_limit: 2g
     environment:
@@ -129,6 +130,7 @@ services:
     build:
       context: ./embedded/gateway
       dockerfile: Dockerfile
+    image: long89kev/smartclassroom-mqtt_gateway:latest
     container_name: doai_mqtt_gateway
     mem_limit: 128m
     environment:

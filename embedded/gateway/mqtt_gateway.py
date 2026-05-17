@@ -337,12 +337,8 @@ def forward_to_testing_inference(session_id: str, frame_bytes: bytes):
         resp = requests.post(url, files=files, params=params, timeout=30)
         if resp.status_code == 200:
             result = resp.json()
-            risk_analysis = result.get("risk_analysis", {})
-            high_risk = [s for s in risk_analysis.get("student_risks", [])
-                        if s.get("risk_level") in ("HIGH", "CRITICAL")]
-
-            if high_risk:
-                logger.warning(f"🚨 {len(high_risk)} high-risk students detected!")
+            if result.get("detection_count", 0) > 0:
+                logger.warning(f"🚨 {result.get('detection_count')} suspicious behaviors detected!")
                 controller.trigger_cheat_alert()
 
             logger.info(f"Testing inference complete: {len(risk_analysis.get('student_risks', []))} students analyzed")
