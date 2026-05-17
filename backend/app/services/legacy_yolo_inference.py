@@ -478,7 +478,18 @@ class YOLOInferenceService:
             draw.rectangle(bbox, fill=color)
             
             # Draw text
-            draw.text((x1, y1), label, fill="white", font=font)
+            r, g, b = color
+            srgb = [r / 255.0, g / 255.0, b / 255.0]
+
+            def _to_linear(channel: float) -> float:
+                return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+            r_lin, g_lin, b_lin = (_to_linear(c) for c in srgb)
+            luma = 0.2126 * r_lin + 0.7152 * g_lin + 0.0722 * b_lin
+            contrast_black = (luma + 0.05) / 0.05
+            contrast_white = 1.05 / (luma + 0.05)
+            text_color = (0, 0, 0) if contrast_black >= contrast_white else (255, 255, 255)
+            draw.text((x1, y1), label, fill=text_color, font=font)
         
         return image_copy
 
