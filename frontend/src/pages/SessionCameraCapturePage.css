@@ -19,7 +19,6 @@
   font-weight: 600;
   color: #666;
   padding: 8px 0;
-  border-bottom: 1px solid #e0e0e0;
 }
 
 .camera-status {
@@ -90,12 +89,12 @@
 }
 
 .btn-primary {
-  background-color: #0066cc;
+  background-color: #2e8b4e;
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #0052a3;
+  background-color: #277744;
 }
 
 .btn-outline {
@@ -198,7 +197,7 @@ tbody tr:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #0066cc;
+  color: #2e8b4e;
   cursor: pointer;
   padding: 4px 0;
   border: none;
@@ -209,7 +208,7 @@ tbody tr:hover {
 }
 
 .inline-link:hover {
-  color: #0052a3;
+  color: #277744;
 }
 
 .inline-link-button {
@@ -306,8 +305,8 @@ h2 {
 .upload-panel {
   padding: 16px;
   border-radius: 8px;
-  border: 1px dashed #0066cc;
-  background-color: #f0f7ff;
+  border: 1px dashed #2e8b4e;
+  background-color: #eefaf0;
   font-size: 13px;
   color: #333;
 }
@@ -316,7 +315,7 @@ h2 {
   display: block;
   width: 100%;
   padding: 8px;
-  border: 1px solid #cce0ff;
+  border: 1px solid #b3d8bc;
   border-radius: 4px;
   background-color: #fff;
   cursor: pointer;
@@ -365,7 +364,7 @@ h2 {
 }
 
 .gallery-item.active {
-  background-color: #eef6ff;
+  background-color: #eefaf0;
 }
 
 .time-tag {
@@ -381,7 +380,7 @@ h2 {
 /* --- Diagnostic Log Monitor Styles --- */
 .diagnostic-log-monitor {
   margin-top: 24px;
-  border-top: 2px solid #0066cc;
+  border-top: 2px solid #2e8b4e;
 }
 
 .monitor-header {
@@ -459,7 +458,7 @@ h2 {
 .btn-text {
   background: none;
   border: none;
-  color: #0066cc;
+  color: #2e8b4e;
   cursor: pointer;
   padding: 0;
   font-size: 11px;

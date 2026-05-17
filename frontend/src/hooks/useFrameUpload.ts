@@ -28,6 +28,7 @@ export function useFrameUpload(
   studentId?: string | null,
   onUploadSuccess?: (response: LearningModeResponse | TestingModeResponse) => void,
   onUploadError?: (errorMessage: string) => void,
+  dryRun: boolean = false,
 ): UseFrameUploadReturn {
   const [state, setState] = useState<UseFrameUploadState>({
     isUploading: false,
@@ -75,6 +76,7 @@ export function useFrameUpload(
           students_present: session?.students_present || [],
           confidence_threshold: confidenceThreshold,
           source_filename: getSourceFilename?.(),
+          dry_run: dryRun,
         })
       } else {
         response = await ingestLearningMode(sessionId, {
@@ -82,6 +84,7 @@ export function useFrameUpload(
           confidence_threshold: confidenceThreshold,
           source_filename: getSourceFilename?.(),
           student_id: studentId || undefined,
+          dry_run: dryRun,
         })
       }
 
@@ -125,6 +128,7 @@ export function useFrameUpload(
     getSourceFilename,
     onUploadSuccess,
     onUploadError,
+    dryRun,
   ])
 
   const scheduleNextUpload = useCallback((): void => {

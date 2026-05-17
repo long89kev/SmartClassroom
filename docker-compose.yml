@@ -3,6 +3,7 @@ services:
   pgadmin:
     image: dpage/pgadmin4
     container_name: doai_pgadmin
+    mem_limit: 256m
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@doai.com
       PGADMIN_DEFAULT_PASSWORD: admin_password # Change this!
@@ -16,6 +17,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: doai_postgres
+    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-doai_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-doai_password}
@@ -37,6 +39,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: doai_redis
+    mem_limit: 128m
     ports:
       - "6379:6379"
     networks:
@@ -50,6 +53,7 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: doai_mosquitto
+    mem_limit: 128m
     ports:
       - "1883:1883"
       - "9001:9001"
@@ -71,6 +75,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: doai_backend
+    mem_limit: 2g
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-doai_user}:${POSTGRES_PASSWORD:-doai_password}@postgres:5432/${POSTGRES_DB:-doai_classroom}
       REDIS_URL: redis://redis:6379/0
@@ -100,6 +105,7 @@ services:
   frontend:
     image: node:18-alpine
     container_name: doai_frontend
+    mem_limit: 512m
     working_dir: /app
     environment:
       VITE_API_PROXY_TARGET: http://backend:8000
@@ -124,6 +130,7 @@ services:
       context: ./embedded/gateway
       dockerfile: Dockerfile
     container_name: doai_mqtt_gateway
+    mem_limit: 128m
     environment:
       MQTT_BROKER_HOST: mosquitto
       MQTT_BROKER_PORT: "1883"

@@ -32,19 +32,54 @@ This system provides:
 ### Setup (Docker)
 
 ```bash
-# 1. Clone the repository
-cd d:\Projects\DoAnDN
-
-# 2. Create .env file
+# 1. Create .env file
 cp .env.example .env
-
-# 3. Start services
-docker-compose up -d
-
-# Database will be initialized at http://localhost:5432
-# Backend API at http://localhost:8000
-# Frontend dev server at http://localhost:3000 (after npm start)
 ```
+
+#### Clean Slate (prune everything)
+
+```bash
+# Stop all containers and remove volumes, images, build cache
+docker compose down
+docker system prune -a --volumes -f
+```
+
+#### CPU-Only Build (default)
+
+```bash
+docker compose up --build -d
+```
+
+#### GPU Build (NVIDIA CUDA)
+
+> **Prerequisites:**
+> - NVIDIA GPU with driver ≥ 525 (tested: RTX 3060 / driver 566.36)
+> - Windows: Docker Desktop with WSL2 backend (GPU passthrough is automatic)
+> - Linux: [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+```
+
+#### Verify CPU vs GPU
+
+```bash
+# Check which execution provider the backend is using
+docker compose logs backend | Select-String "ExecutionProvider"
+# GPU → "Using ONNX Runtime 1.20.1 with CUDAExecutionProvider"
+# CPU → "Using ONNX Runtime x.x.x with CPUExecutionProvider"
+```
+
+#### Service URLs
+
+| Service  | URL                          |
+|----------|------------------------------|
+| Frontend | http://localhost:5173         |
+| Backend  | http://localhost:8000         |
+| Postgres | localhost:5432               |
+| PgAdmin  | http://localhost:5050         |
+| Redis    | localhost:6379               |
+| MQTT     | localhost:1883               |
 
 ### Setup (Local Development)
 
