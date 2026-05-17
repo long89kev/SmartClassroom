@@ -576,28 +576,58 @@ def health():
 #  Entry Point
 # ═══════════════════════════════════════════════════════════
 
+TOPIC_MODE = "classroom/mode"  # ESP32 mode topic
+
+
 def signal_handler(sig, frame):
     global running
+
+    camera_active = False
+    with state_lock:
+        camera_active = attendance_state.get("camera_active", False)
+
     if not running:
-        # Second Ctrl+C — force exit immediately
+        # Already shutting down — force exit immediately
         logger.info("Force shutdown!")
         os._exit(1)
+
+    if camera_active:
+        logger.warning("⚠ Camera is active — press Ctrl+C again to force stop")
+        running = False  # Mark for shutdown; the recognition loop will release the camera
+
+        # Wait for camera to release, then exit cleanly
+        def _wait_and_exit():
+            # Give the recognition loop up to 3 seconds to release the camera
+            for _ in range(30):
+                time.sleep(0.1)
+                with state_lock:
+                    if not attendance_state.get("camera_active", False):
+                        break
+
+            _reset_lcd_and_exit()
+
+        threading.Thread(target=_wait_and_exit, daemon=True).start()
+        return
+
     logger.info("Shutting down...")
     running = False
 
-    # Perform cleanup in a separate thread so the signal handler returns quickly
-    def _cleanup_and_exit():
-        time.sleep(1)  # Give recognition thread time to stop
-        if mqtt_client:
-            try:
-                mqtt_client.loop_stop()
-                mqtt_client.disconnect()
-            except Exception:
-                pass
-        logger.info("Attendance service stopped.")
-        os._exit(0)
+    threading.Thread(target=_reset_lcd_and_exit, daemon=True).start()
 
-    threading.Thread(target=_cleanup_and_exit, daemon=True).start()
+
+def _reset_lcd_and_exit():
+    """Reset ESP32 LCD to IDLE state and exit the process."""
+    if mqtt_client:
+        try:
+            # Publish IDLE mode so ESP32 reverts LCD to "Mode: IDLE / Standby"
+            mqtt_client.publish(TOPIC_MODE, "IDLE", qos=1)
+            time.sleep(0.5)  # Let MQTT messages flush
+            mqtt_client.loop_stop()
+            mqtt_client.disconnect()
+        except Exception:
+            pass
+    logger.info("Attendance service stopped.")
+    os._exit(0)
 
 
 def main():
@@ -685,20 +715,31 @@ def main():
     logger.info(f"✓ Status JSON:  http://localhost:{config.STREAM_PORT}/status")
 
     try:
-        flask_app.run(
-            host=config.STREAM_HOST,
-            port=config.STREAM_PORT,
-            debug=False,
+        from werkzeug.serving import make_server
+        server = make_server(
+            config.STREAM_HOST,
+            config.STREAM_PORT,
+            flask_app,
             threaded=True,
-            use_reloader=False,
         )
+        server.timeout = 1  # Short timeout so the loop can check `running`
+
+        logger.info(f" * Running on http://{config.STREAM_HOST}:{config.STREAM_PORT}")
+
+        while running:
+            server.handle_request()
     except KeyboardInterrupt:
         pass
     finally:
         running = False
         if mqtt_client:
-            mqtt_client.loop_stop()
-            mqtt_client.disconnect()
+            try:
+                mqtt_client.publish(TOPIC_MODE, "IDLE", qos=1)
+                time.sleep(0.3)
+                mqtt_client.loop_stop()
+                mqtt_client.disconnect()
+            except Exception:
+                pass
         logger.info("Attendance service stopped.")
 
 

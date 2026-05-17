@@ -9,11 +9,11 @@
 #define CONFIG_H
 
 // ─── WiFi Configuration ─────────────────────────────────
-#define WIFI_SSID "overthinkers tret"
-#define WIFI_PASSWORD "stopthinking"
+#define WIFI_SSID "Hcmut4"
+#define WIFI_PASSWORD "08092005"
 
 // ─── MQTT Broker (Mosquitto in Docker) ──────────────────
-#define MQTT_BROKER_IP "192.168.0.177" // IP of the machine running Docker
+#define MQTT_BROKER_IP "192.168.43.219" // IP of the machine running Docker
 #define MQTT_BROKER_PORT 1883
 #define MQTT_CLIENT_ID "esp32_sensor_node"
 #define MQTT_USERNAME "" // Leave empty if anonymous

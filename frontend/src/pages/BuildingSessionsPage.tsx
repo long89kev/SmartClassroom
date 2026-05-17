@@ -1178,17 +1178,6 @@ export function BuildingSessionsPage(): JSX.Element {
                   <h3>Device Status</h3>
                   <span>Manage hardware status overrides.</span>
                 </div>
-                {selectedRoomId !== 'ALL' && (
-                  <button
-                    type="button"
-                    onClick={() => void handleToggleAutoMode()}
-                    disabled={!canToggleDevices}
-                    className={`device-status-toggle ${isRoomAuto ? 'on' : 'off'}`}
-                    style={{ minWidth: '140px' }}
-                  >
-                    Mode: {isRoomAuto ? 'AUTO' : 'MANUAL'}
-                  </button>
-                )}
               </div>
 
               {createDeviceMessage ? (
@@ -1292,6 +1281,17 @@ export function BuildingSessionsPage(): JSX.Element {
                     const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
                     const isEditing = editingDeviceId === device.device_id && editingDeviceRoomId === device.room_id
 
+                    const deviceTypeCode = (device.device_type ?? '').toUpperCase()
+                    const roomTh = roomThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                    const globalTh = globalThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                    const effectiveTh = roomTh || globalTh
+                    const isThresholdEnabled = effectiveTh?.enabled ?? false
+
+                    const disableToggle = !canToggleDevices || isThresholdEnabled
+                    const toggleTitle = isThresholdEnabled 
+                      ? "Automatic threshold is enabled. Disable it to control manually." 
+                      : (canToggleDevices ? "Click to toggle status" : "View only")
+
                     return (
                       <tr key={device.device_id}>
                         <td>{device.device_id}</td>
@@ -1326,8 +1326,9 @@ export function BuildingSessionsPage(): JSX.Element {
                             type="button"
                             className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
                             onClick={() => void handleToggleDevice(device)}
-                            disabled={!canToggleDevices}
-                            title={canToggleDevices ? "Click to toggle status" : "View only"}
+                            disabled={disableToggle}
+                            title={toggleTitle}
+                            style={isThresholdEnabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                           >
                             {isOn ? 'ON' : 'OFF'}
                           </button>

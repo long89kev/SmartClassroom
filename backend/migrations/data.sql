@@ -801,17 +801,17 @@ BEGIN
 
     INSERT INTO room_sensor_readings (id, room_id, sensor_key, value, unit, source_topic, captured_at, updated_at)
     VALUES
-        (uuid_generate_v4(), v_ai_room_id, 'temperature', 24.4, 'CELSIUS', 'building/A1/floor/2/room/A1-F2-R03/sensor/temperature', NOW() - INTERVAL '30 seconds', NOW()),
-        (uuid_generate_v4(), v_ai_room_id, 'humidity', 61.0, 'PERCENT', 'building/A1/floor/2/room/A1-F2-R03/sensor/humidity', NOW() - INTERVAL '30 seconds', NOW()),
-        (uuid_generate_v4(), v_ai_room_id, 'co2', 780.0, 'PPM', 'building/A1/floor/2/room/A1-F2-R03/sensor/co2', NOW() - INTERVAL '30 seconds', NOW()),
-        (uuid_generate_v4(), v_iot_lab_room_id, 'temperature', 23.1, 'CELSIUS', 'building/LAB9/floor/1/room/LAB9-F1-R02/sensor/temperature', NOW() - INTERVAL '45 seconds', NOW()),
-        (uuid_generate_v4(), v_iot_lab_room_id, 'humidity', 57.0, 'PERCENT', 'building/LAB9/floor/1/room/LAB9-F1-R02/sensor/humidity', NOW() - INTERVAL '45 seconds', NOW()),
-        (uuid_generate_v4(), v_iot_lab_room_id, 'noise', 47.0, 'DB', 'building/LAB9/floor/1/room/LAB9-F1-R02/sensor/noise', NOW() - INTERVAL '45 seconds', NOW()),
-        (uuid_generate_v4(), v_test_room_id, 'temperature', 22.7, 'CELSIUS', 'building/B1/floor/1/room/B1-F1-R02/sensor/temperature', NOW() - INTERVAL '20 seconds', NOW()),
-        (uuid_generate_v4(), v_test_room_id, 'light', 515.0, 'LUX', 'building/B1/floor/1/room/B1-F1-R02/sensor/light', NOW() - INTERVAL '20 seconds', NOW()),
-        (uuid_generate_v4(), v_test_room_id, 'co2', 690.0, 'PPM', 'building/B1/floor/1/room/B1-F1-R02/sensor/co2', NOW() - INTERVAL '20 seconds', NOW()),
-        (uuid_generate_v4(), v_lecturer_spare_room_id, 'temperature', 29.2, 'CELSIUS', 'building/A2/floor/1/room/A2-F1-R05/sensor/temperature', NOW() - INTERVAL '15 minutes', NOW()),
-        (uuid_generate_v4(), v_lecturer_spare_room_id, 'light', 80.0, 'LUX', 'building/A2/floor/1/room/A2-F1-R05/sensor/light', NOW() - INTERVAL '15 minutes', NOW());
+        (uuid_generate_v4(), v_ai_room_id, 'TEMPERATURE', 24.4, 'C', 'building/A1/floor/2/room/A1-203/sensor/temperature', NOW() - INTERVAL '30 seconds', NOW()),
+        (uuid_generate_v4(), v_ai_room_id, 'HUMIDITY', 61.0, '%', 'building/A1/floor/2/room/A1-203/sensor/humidity', NOW() - INTERVAL '30 seconds', NOW()),
+        (uuid_generate_v4(), v_ai_room_id, 'CO2', 780.0, 'PPM', 'building/A1/floor/2/room/A1-203/sensor/co2', NOW() - INTERVAL '30 seconds', NOW()),
+        (uuid_generate_v4(), v_iot_lab_room_id, 'TEMPERATURE', 23.1, 'C', 'building/LAB9/floor/1/room/LAB9-102/sensor/temperature', NOW() - INTERVAL '45 seconds', NOW()),
+        (uuid_generate_v4(), v_iot_lab_room_id, 'HUMIDITY', 57.0, '%', 'building/LAB9/floor/1/room/LAB9-102/sensor/humidity', NOW() - INTERVAL '45 seconds', NOW()),
+        (uuid_generate_v4(), v_iot_lab_room_id, 'NOISE', 47.0, 'DB', 'building/LAB9/floor/1/room/LAB9-102/sensor/noise', NOW() - INTERVAL '45 seconds', NOW()),
+        (uuid_generate_v4(), v_test_room_id, 'TEMPERATURE', 22.7, 'C', 'building/B1/floor/1/room/B1-102/sensor/temperature', NOW() - INTERVAL '20 seconds', NOW()),
+        (uuid_generate_v4(), v_test_room_id, 'LIGHT', 515.0, 'LUX', 'building/B1/floor/1/room/B1-102/sensor/light', NOW() - INTERVAL '20 seconds', NOW()),
+        (uuid_generate_v4(), v_test_room_id, 'CO2', 690.0, 'PPM', 'building/B1/floor/1/room/B1-102/sensor/co2', NOW() - INTERVAL '20 seconds', NOW()),
+        (uuid_generate_v4(), v_lecturer_spare_room_id, 'TEMPERATURE', 29.2, 'C', 'building/A2/floor/1/room/A2-105/sensor/temperature', NOW() - INTERVAL '15 minutes', NOW()),
+        (uuid_generate_v4(), v_lecturer_spare_room_id, 'LIGHT', 80.0, 'LUX', 'building/A2/floor/1/room/A2-105/sensor/light', NOW() - INTERVAL '15 minutes', NOW());
 
     DELETE FROM iot_rules
     WHERE rule_name IN (

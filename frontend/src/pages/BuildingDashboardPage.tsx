@@ -1702,6 +1702,17 @@ export function BuildingDashboardPage(): JSX.Element {
                         {roomDeviceRows.map((device) => {
                           const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
 
+                          const deviceTypeCode = (device.device_type ?? '').toUpperCase()
+                          const roomTh = roomThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                          const globalTh = globalThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                          const effectiveTh = roomTh || globalTh
+                          const isThresholdEnabled = effectiveTh?.enabled ?? false
+
+                          const disableToggle = !canToggleDevices || isThresholdEnabled
+                          const toggleTitle = isThresholdEnabled 
+                            ? "Automatic threshold is enabled. Disable it to control manually." 
+                            : (canToggleDevices ? 'Click to toggle status' : 'View only')
+
                           return (
                             <tr key={device.device_id}>
                               <td>{device.device_id}</td>
@@ -1713,8 +1724,9 @@ export function BuildingDashboardPage(): JSX.Element {
                                   type="button"
                                   className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
                                   onClick={() => void handleToggleSingleDevice(device.device_id, isOn ? 'OFF' : 'ON', device.room_id)}
-                                  disabled={!canToggleDevices}
-                                  title={canToggleDevices ? 'Click to toggle status' : 'View only'}
+                                  disabled={disableToggle}
+                                  title={toggleTitle}
+                                  style={isThresholdEnabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                                 >
                                   {isOn ? 'ON' : 'OFF'}
                                 </button>
@@ -2116,6 +2128,17 @@ export function BuildingDashboardPage(): JSX.Element {
                           const isOn = (device.status ?? 'OFF').toUpperCase() === 'ON'
                           const isEditing = editingDeviceId === device.device_id && editingDeviceRoomId === device.room_id
 
+                          const deviceTypeCode = (device.device_type ?? '').toUpperCase()
+                          const roomTh = roomThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                          const globalTh = globalThresholds.find(t => (t.device_type_code || '').toUpperCase() === deviceTypeCode)
+                          const effectiveTh = roomTh || globalTh
+                          const isThresholdEnabled = effectiveTh?.enabled ?? false
+
+                          const disableToggle = !canToggleDevices || isThresholdEnabled
+                          const toggleTitle = isThresholdEnabled 
+                            ? "Automatic threshold is enabled. Disable it to control manually." 
+                            : (canToggleDevices ? "Click to toggle status" : "View only")
+
                           return (
                             <tr key={device.device_id}>
                               <td>{device.device_type} {device.device_index}</td>
@@ -2161,7 +2184,9 @@ export function BuildingDashboardPage(): JSX.Element {
                                   type="button"
                                   className={`device-status-toggle ${isOn ? 'on' : 'off'}`}
                                   onClick={() => void handleToggleDevice(device)}
-                                  disabled={!canToggleDevices}
+                                  disabled={disableToggle}
+                                  title={toggleTitle}
+                                  style={isThresholdEnabled ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                                 >
                                   {isOn ? 'ON' : 'OFF'}
                                 </button>

@@ -78,6 +78,7 @@ class DeviceController:
         self.publish = publish_fn
         self._fan_was_on = False
         self._lights_were_on = False
+        self._ac_was_on = False
 
         # Dynamic thresholds keyed by device_type (e.g. "AC", "FAN", "LIGHT")
         # Initialised from the static defaults so control works before the
@@ -156,7 +157,8 @@ class DeviceController:
 
     def _evaluate_all(self):
         """Re-evaluate every control rule. Called after threshold changes."""
-        self._evaluate_hvac()
+        self._evaluate_ac()
+        self._evaluate_fan()
         self._evaluate_light_level()
         self._evaluate_lighting()
 
@@ -167,12 +169,13 @@ class DeviceController:
         self.state.temperature = value
         self.state.last_sensor_update = time.time()
         logger.debug(f"Temperature updated: {value}°C")
-        self._evaluate_hvac()
+        self._evaluate_ac()
 
     def on_humidity(self, value: float):
         """Handle humidity reading from DHT22."""
         self.state.humidity = value
         logger.debug(f"Humidity updated: {value}%")
+        self._evaluate_fan()
 
     def on_light(self, value: float):
         """Handle light reading."""
@@ -269,10 +272,7 @@ class DeviceController:
 
         light_th = self.get_threshold("LIGHT")
         if light_th and not light_th.enabled:
-            # Threshold disabled → turn lights off
-            if self._lights_were_on:
-                logger.info("Lights OFF — LIGHT threshold disabled")
-                self._set_all_lights(False)
+            # Threshold disabled -> allow manual control (do nothing)
             return
 
         # If sensor-based thresholds are active, let _evaluate_light_level
@@ -346,29 +346,20 @@ class DeviceController:
 
         self._lights_were_on = on
 
-    # ─── Control Logic: HVAC (Section 7.2) ───────────────
+    # ─── Control Logic: HVAC (AC & FAN) ───────────────
 
-    def _evaluate_hvac(self):
+    def _evaluate_ac(self):
         """
-        HVAC Control Logic using **dynamic thresholds** from the dashboard.
-
-        The AC threshold drives fan behaviour:
-          - reading > max  → fans ON  (too hot)
-          - reading < min  → fans OFF (cool enough)
-          - min < reading < max → maintain current state (hysteresis)
-
-        Falls back to the static defaults when no AC threshold exists.
+        AC Control Logic using dynamic thresholds from the dashboard.
+        The AC threshold drives AC behaviour based on temperature.
         """
         if not self.state.is_auto:
             return
 
         ac_th = self.get_threshold("AC")
 
-        # If threshold is explicitly disabled, turn fans off
+        # If threshold is explicitly disabled, allow manual control (do nothing)
         if ac_th and not ac_th.enabled:
-            if self._fan_was_on:
-                logger.info("Fans OFF — AC threshold disabled")
-                self._set_all_fans(False)
             return
 
         temp = self.state.temperature
@@ -382,18 +373,57 @@ class DeviceController:
             eff_min = default_thresholds.temp_low
 
         if temp > eff_max:
-            # Hot — fans ON
-            if not self._fan_was_on:
-                logger.info(f"Fans ON — temperature {temp}°C > max threshold {eff_max}°C")
-                self._set_all_fans(True)
-
+            if not self._ac_was_on:
+                logger.info(f"AC ON — temperature {temp}°C > max threshold {eff_max}°C")
+                self._set_all_acs(True)
         elif temp < eff_min:
-            # Cool enough — fans OFF
+            if self._ac_was_on:
+                logger.info(f"AC OFF — temperature {temp}°C < min threshold {eff_min}°C")
+                self._set_all_acs(False)
+
+    def _evaluate_fan(self):
+        """
+        FAN Control Logic using dynamic thresholds from the dashboard.
+        The FAN threshold drives FAN behaviour based on humidity.
+        """
+        if not self.state.is_auto:
+            return
+
+        fan_th = self.get_threshold("FAN")
+
+        # If threshold is explicitly disabled, allow manual control (do nothing)
+        if fan_th and not fan_th.enabled:
+            return
+
+        humidity = self.state.humidity
+
+        # We'll use the dynamic threshold, or fallback to some hardcoded values if missing
+        if fan_th and fan_th.max_value is not None and fan_th.min_value is not None:
+            eff_max = fan_th.max_value
+            eff_min = fan_th.min_value
+        else:
+            eff_max = 70.0  # Fallback high humidity
+            eff_min = 60.0  # Fallback low humidity
+
+        if humidity > eff_max:
+            if not self._fan_was_on:
+                logger.info(f"Fans ON — humidity {humidity}% > max threshold {eff_max}%")
+                self._set_all_fans(True)
+        elif humidity < eff_min:
             if self._fan_was_on:
-                logger.info(f"Fans OFF — temperature {temp}°C < min threshold {eff_min}°C")
+                logger.info(f"Fans OFF — humidity {humidity}% < min threshold {eff_min}%")
                 self._set_all_fans(False)
 
-        # Between min and max → keep current state (hysteresis)
+    def _set_all_acs(self, on: bool):
+        """Control all AC relay channels."""
+        ac_channels = [ch for ch, dtype in room_config.relay_device_type.items()
+                       if dtype == "AC"]
+
+        for ch in ac_channels:
+            if self.state.relay_states.get(ch) != on:
+                self._set_relay(ch, on)
+
+        self._ac_was_on = on
 
     def _set_all_fans(self, on: bool):
         """Control all fan relay channels."""

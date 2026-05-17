@@ -130,7 +130,7 @@ def seed_test_data():
             db.add(config)
         
         db.commit()
-        print(f"\n✅ Successfully created test environment!")
+        print("\nSuccessfully created test environment!")
         print(f"=====================================")
         print(f"Room Code: TEST-R01")
         print(f"Room ID:   {room.id}")
