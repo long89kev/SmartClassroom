@@ -53,6 +53,9 @@ def on_connect(client, userdata, flags, rc):
         for topic in Topics.all_subscribe_topics():
             client.subscribe(topic)
             logger.info(f"  Subscribed: {topic}")
+        
+        client.subscribe("classroom/mode/auto_manual")
+        logger.info("  Subscribed: classroom/mode/auto_manual")
     else:
         logger.error(f"✗ MQTT connection failed (rc={rc})")
 
@@ -121,6 +124,11 @@ def on_message(client, userdata, msg):
         elif topic.startswith("classroom/actuators/relay/") and topic.endswith("/state"):
             channel = topic.split("/")[3]
             logger.info(f"Relay CH{channel} confirmed: {payload}")
+            
+        # ─── Auto/Manual Mode Toggle ───────────────
+        elif topic == "classroom/mode/auto_manual":
+            is_auto = payload.upper() in ("AUTO", "ON", "1", "TRUE")
+            controller.set_auto_mode(is_auto)
 
     except json.JSONDecodeError:
         logger.error(f"Invalid JSON on {topic}: {payload[:50]}")
@@ -189,6 +197,78 @@ def fetch_active_session():
         return None
     except requests.RequestException:
         return None
+
+
+def fetch_room_thresholds() -> list[dict] | None:
+    """
+    Fetch the effective thresholds for the configured room from the backend.
+    Returns the merged list (room overrides + global defaults) or None on error.
+    """
+    if not room_config.room_id:
+        return None
+
+    try:
+        url = f"{backend_config.api_url}/rooms/{room_config.room_id}/thresholds"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()  # list of {device_type_code, min_value, max_value, ...}
+        else:
+            logger.warning(f"Threshold fetch failed ({resp.status_code}): {resp.text[:100]}")
+            return None
+    except requests.RequestException as e:
+        logger.error(f"Threshold fetch connection error: {e}")
+        return None
+
+def fetch_auto_mode() -> bool | None:
+    """Fetch the hardcoded auto/manual mode from the backend."""
+    if not room_config.room_id:
+        return None
+    try:
+        url = f"{backend_config.api_url}/rooms/{room_config.room_id}/auto-mode"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            return resp.json().get("is_auto", True)
+        return None
+    except requests.RequestException:
+        return None
+
+
+def fetch_device_states() -> list[dict] | None:
+    """
+    Fetch device states from the backend to detect manual overrides
+    triggered by the frontend toggle buttons.
+    """
+    if not room_config.room_id:
+        return None
+
+    try:
+        url = f"{backend_config.api_url}/rooms/{room_config.room_id}/devices/status/all"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("device_states", [])
+        else:
+            logger.warning(f"Device states fetch failed ({resp.status_code})")
+            return None
+    except requests.RequestException as e:
+        logger.error(f"Device states fetch connection error: {e}")
+        return None
+
+
+def clear_manual_override(device_id: str) -> bool:
+    """
+    Clear the manual_override flag on a device after we've applied it.
+    This prevents the gateway from re-applying the same override repeatedly.
+    """
+    if not room_config.room_id:
+        return False
+
+    try:
+        url = f"{backend_config.api_url}/devices/{device_id}/clear-override-internal"
+        resp = requests.post(url, params={"room_id": room_config.room_id}, timeout=5)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
 
 
 def handle_frame_ready(data: dict):
@@ -303,6 +383,90 @@ def backend_poll_loop():
             logger.error(f"Backend poll error: {e}")
 
         time.sleep(10)  # Poll every 10 seconds
+
+
+def threshold_poll_loop():
+    """
+    Periodically fetch room thresholds from the backend and push
+    into the device controller.  When the user changes min/max on
+    the dashboard, the controller will pick up the new values here
+    and immediately re-evaluate relay states.
+    """
+    while running:
+        try:
+            thresholds_data = fetch_room_thresholds()
+            if thresholds_data is not None:
+                controller.update_thresholds(thresholds_data)
+                
+            auto_mode = fetch_auto_mode()
+            if auto_mode is not None:
+                controller.set_auto_mode(auto_mode)
+        except Exception as e:
+            logger.error(f"Threshold poll error: {e}")
+
+        time.sleep(10)  # Check every 10 seconds
+
+
+def device_state_poll_loop():
+    """
+    Periodically fetch device states from the backend and apply any
+    manual overrides triggered by the frontend toggle buttons.
+
+    Flow:
+      1. Frontend user clicks ON/OFF button
+      2. Backend sets device_state.status + manual_override = True
+      3. This loop detects the manual_override flag
+      4. Maps device_type → relay channels and publishes MQTT commands
+      5. Clears the manual_override flag so it isn't re-applied
+    """
+    while running:
+        try:
+            device_states = fetch_device_states()
+            if device_states:
+                for ds in device_states:
+                    if not ds.get("manual_override", False):
+                        continue
+
+                    device_id = ds.get("device_id", "")
+                    device_type = ds.get("device_type", "").upper()
+                    desired_status = ds.get("status", "OFF").upper()
+                    on = desired_status == "ON"
+
+                    # Find all relay channels for this device type
+                    channels = [
+                        ch for ch, dtype in room_config.relay_device_type.items()
+                        if dtype == device_type
+                    ]
+
+                    if channels:
+                        logger.info(
+                            f"Manual override: {device_id} ({device_type}) → {desired_status} "
+                            f"(channels: {channels})"
+                        )
+                        for ch in channels:
+                            state_str = "ON" if on else "OFF"
+                            mqtt_client.publish(Topics.relay(ch), state_str)
+                            controller.state.relay_states[ch] = on
+                            logger.info(f"  Relay CH{ch} → {state_str}")
+
+                        # Update controller tracking flags
+                        if device_type == "FAN":
+                            controller._fan_was_on = on
+                        elif device_type == "LIGHT":
+                            controller._lights_were_on = on
+                    else:
+                        logger.warning(
+                            f"Manual override: {device_id} ({device_type}) — "
+                            f"no relay channel mapped for this device type"
+                        )
+
+                    # Clear the override so we don't re-apply it
+                    clear_manual_override(device_id)
+
+        except Exception as e:
+            logger.error(f"Device state poll error: {e}")
+
+        time.sleep(5)  # Check every 5 seconds for responsive toggle
 
 
 # ═══════════════════════════════════════════════════════════
@@ -420,6 +584,14 @@ def main():
     poll_thread = threading.Thread(target=backend_poll_loop, daemon=True)
     poll_thread.start()
     logger.info("✓ Backend poll thread started")
+
+    threshold_thread = threading.Thread(target=threshold_poll_loop, daemon=True)
+    threshold_thread.start()
+    logger.info("✓ Threshold poll thread started")
+
+    device_state_thread = threading.Thread(target=device_state_poll_loop, daemon=True)
+    device_state_thread.start()
+    logger.info("✓ Device state poll thread started")
 
     control_thread = threading.Thread(target=control_loop, daemon=True)
     control_thread.start()

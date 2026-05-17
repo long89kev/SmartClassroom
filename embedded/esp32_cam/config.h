@@ -14,7 +14,7 @@
 #define WIFI_PASSWORD     "08092005long"
 
 // ─── MQTT Broker (Mosquitto in Docker) ──────────────────
-#define MQTT_BROKER_IP    "192.168.43.234"   // IP of the machine running Docker
+#define MQTT_BROKER_IP    "192.168.0.177"   // IP of the machine running Docker
 #define MQTT_BROKER_PORT  1883
 #define MQTT_CLIENT_ID    "esp32_cam_node"
 #define MQTT_USERNAME     ""

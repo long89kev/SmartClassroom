@@ -7,7 +7,7 @@ import json
 # CONFIGURATION
 # Match this to your ESP32's config.h
 # ==========================================
-MQTT_BROKER = "192.168.1.104" 
+MQTT_BROKER = "192.168.0.177" 
 MQTT_PORT = 1883
 
 TOPIC_TEMP   = "classroom/sensors/temperature"
@@ -68,9 +68,20 @@ class SmartClassroomInterface:
                 bg="#45475A", fg="#CDD6F4", activebackground="#585B70",
                 command=lambda idx=i: self.toggle_actuator(idx)
             )
-            # Layout in a 2x2 Grid
+            # Layout in a 2x2 Grid (last button will be bottom center)
             btn.grid(row=i//2, column=i%2, padx=10, pady=7)
             self.buttons.append(btn)
+            
+        # Add Auto/Manual Toggle Button
+        self.is_auto = True
+        self.btn_auto_manual = tk.Button(
+            control_frame,
+            text="Mode: AUTO",
+            font=font_btn, width=13,
+            bg="#A6E3A1", fg="#1E1E2E", activebackground="#89DCEB",
+            command=self.toggle_auto_manual
+        )
+        self.btn_auto_manual.grid(row=2, column=1, padx=10, pady=7)
             
         # Optional: configure grid to center the buttons
         control_frame.grid_columnconfigure(0, weight=1)
@@ -98,6 +109,14 @@ class SmartClassroomInterface:
             self.client.loop_start()  # Runs the network loop in a background thread
         except Exception as e:
             self.lbl_status.config(text=f"Connection Error: {e}", fg="#F38BA8")
+
+    def toggle_auto_manual(self):
+        self.is_auto = not self.is_auto
+        mode_text = "AUTO" if self.is_auto else "MANUAL"
+        color_bg = "#A6E3A1" if self.is_auto else "#F9E2AF"
+        
+        self.btn_auto_manual.config(text=f"Mode: {mode_text}", bg=color_bg)
+        self.client.publish("classroom/mode/auto_manual", "ON" if self.is_auto else "OFF")
 
     def toggle_actuator(self, idx):
         # Toggle mathematical state

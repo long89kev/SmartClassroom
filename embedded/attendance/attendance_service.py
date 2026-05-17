@@ -578,8 +578,26 @@ def health():
 
 def signal_handler(sig, frame):
     global running
+    if not running:
+        # Second Ctrl+C — force exit immediately
+        logger.info("Force shutdown!")
+        os._exit(1)
     logger.info("Shutting down...")
     running = False
+
+    # Perform cleanup in a separate thread so the signal handler returns quickly
+    def _cleanup_and_exit():
+        time.sleep(1)  # Give recognition thread time to stop
+        if mqtt_client:
+            try:
+                mqtt_client.loop_stop()
+                mqtt_client.disconnect()
+            except Exception:
+                pass
+        logger.info("Attendance service stopped.")
+        os._exit(0)
+
+    threading.Thread(target=_cleanup_and_exit, daemon=True).start()
 
 
 def main():

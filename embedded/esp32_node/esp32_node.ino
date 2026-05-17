@@ -274,12 +274,6 @@ void readSensors() {
   Serial.print(currentLight, 1);
   Serial.println("%");
 
-  if (currentLight >= 80.0) {
-    setRelay(1, true);
-    setRelay(2, true);
-    setRelay(3, true);
-  }
-
   int status = dht20.read();
   if (status == DHT20_OK) {
     currentTemp = dht20.getTemperature();

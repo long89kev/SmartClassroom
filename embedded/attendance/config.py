@@ -15,7 +15,7 @@ CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "480"))
 CAPTURE_INTERVAL_SEC = float(os.getenv("CAPTURE_INTERVAL", "3"))  # seconds between recognition attempts
 
 # ─── MQTT (for LCD display updates) ─────────────────────
-MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "192.168.1.104")
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "192.168.0.177")
 MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
@@ -28,7 +28,7 @@ TOPIC_ATTENDANCE_STATUS = "classroom/attendance/status"  # JSON status for live 
 
 # ─── Backend API ─────────────────────────────────────────
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-BACKEND_USERNAME = os.getenv("BACKEND_USERNAME", "admin")
+BACKEND_USERNAME = os.getenv("BACKEND_USERNAME", "admin_demo")
 BACKEND_PASSWORD = os.getenv("BACKEND_PASSWORD", "admin123")
 ROOM_CODE = os.getenv("ROOM_CODE", "A1-F1-R04")
 

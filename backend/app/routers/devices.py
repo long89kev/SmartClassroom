@@ -24,7 +24,24 @@ from app.schemas.common import (
 from app.routers.auth import get_current_user, get_user_permissions, is_superuser
 import uuid
 
+# Hardcoded auto/manual state mapping: room_id (UUID string) -> is_auto (bool)
+ROOM_AUTO_MODES = {}
+
 router = APIRouter(prefix="/api", tags=["Device Management"])
+
+@router.get("/rooms/{room_id}/auto-mode")
+async def get_room_auto_mode(room_id: UUID):
+    """Get the hardcoded auto/manual mode for a room."""
+    # Default is True (AUTO)
+    is_auto = ROOM_AUTO_MODES.get(str(room_id), True)
+    return {"is_auto": is_auto}
+
+@router.post("/rooms/{room_id}/auto-mode")
+async def toggle_room_auto_mode(room_id: UUID, payload: dict = Body(...)):
+    """Toggle the hardcoded auto/manual mode for a room."""
+    is_auto = payload.get("is_auto", True)
+    ROOM_AUTO_MODES[str(room_id)] = is_auto
+    return {"message": "Mode updated", "is_auto": is_auto}
 
 ALLOWED_FB = {"FRONT", "BACK"}
 ALLOWED_LR = {"LEFT", "RIGHT"}
